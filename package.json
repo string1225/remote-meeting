@@ -10,7 +10,8 @@
     "dev": "node --watch --env-file-if-exists=.env server/index.js",
     "test": "node --test test/*.test.js",
     "test:e2e": "node test/browser.mjs",
-    "check": "node --check server/index.js && node --check server/app.js && node --check public/app.js"
+    "test:accounts": "node test/accounts-browser.mjs",
+    "check": "node --check server/index.js && node --check server/app.js && node --check server/users.js && node --check public/app.js && node --check public/accounts.js"
   },
   "dependencies": { "ws": "^8.18.3" },
   "devDependencies": { "playwright": "^1.55.0" }

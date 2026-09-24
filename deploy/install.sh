@@ -17,12 +17,15 @@ cd "$release_dir"
 npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 if [[ ! -f /etc/remote-meeting.env ]]; then
     umask 077
-    admin_key="$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')"
+    admin_key="$(node -e 'console.log(require("crypto").randomInt(10000000,100000000))')"
     cat > /etc/remote-meeting.env <<EOF
 NODE_ENV=production
 HOST=127.0.0.1
 PORT=3033
-ADMIN_KEY=$admin_key
+BOOTSTRAP_ADMIN_USERNAME=admin
+BOOTSTRAP_ADMIN_PASSWORD=$admin_key
+USERS_FILE=/var/lib/remote-meeting/users.json
+COOKIE_PATH=/meeting/
 ALLOWED_ORIGINS=$origin
 TRUST_PROXY=true
 STUN_URLS=stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302
@@ -30,6 +33,10 @@ ROOM_TTL_HOURS=8
 EOF
     unset admin_key
 fi
+# Keep accounts outside versioned releases; upgrades from shared-key login seed
+# the first admin from ADMIN_KEY once, without changing existing credentials.
+grep -q '^USERS_FILE=' /etc/remote-meeting.env || printf '\nUSERS_FILE=/var/lib/remote-meeting/users.json\n' >> /etc/remote-meeting.env
+grep -q '^COOKIE_PATH=' /etc/remote-meeting.env || printf 'COOKIE_PATH=/meeting/\n' >> /etc/remote-meeting.env
 chmod 600 /etc/remote-meeting.env
 mkdir -p /etc/nginx/snippets /opt/remote-meeting/backups
 stamp="$(date +%Y%m%d%H%M%S)"
@@ -71,4 +78,4 @@ if [[ "$healthy" != true ]]; then
 fi
 systemctl reload nginx
 printf '\nDeployed: %s/meeting/\n' "$origin"
-printf 'Admin key is stored only in /etc/remote-meeting.env (root-only).\n'
+printf 'Bootstrap login is stored in /etc/remote-meeting.env (root-only); account hashes persist in /var/lib/remote-meeting/users.json.\n'

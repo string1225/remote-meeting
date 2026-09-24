@@ -1,3 +1,5 @@
+import { initAccounts } from './accounts.js';
+
 const $ = id => document.getElementById(id);
 const fragment = new URLSearchParams(location.hash.slice(1));
 let invitation = fragment.has('room') && fragment.has('token') ? { room: fragment.get('room'), token: fragment.get('token') } : null;
@@ -6,6 +8,7 @@ let media = [], socket, self, iceServers = [], active = false, joining = false, 
 let reconnectAttempt = 0, guestToken;
 const peers = new Map();
 const base = new URL('./', location.href);
+const accounts = initAccounts(notify);
 
 function notify(text, error = false, persistent = false) {
   clearTimeout(messageTimer);
@@ -95,9 +98,10 @@ $('setup-form').onsubmit = async event => {
   if (joining) return;
   setBusy(true);
   try {
+    if (!invitation) await accounts.ensureLoggedIn();
     await captureMedia();
     if (!invitation) {
-      const response = await fetch(new URL('api/rooms', base), { method: 'POST', headers: { Authorization: `Bearer ${$('admin-key').value}` } });
+      const response = await fetch(new URL('api/rooms', base), { method: 'POST' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '创建会议失败');
       invitation = { room: data.room, token: data.hostToken };

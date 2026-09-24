@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { createMeetingServer } from '../server/app.js';
 
 const adminKey = process.env.E2E_ADMIN_KEY || 'e2e-test-only-admin-key-32-characters';
-const server = process.env.E2E_BASE_URL ? null : createMeetingServer({ ADMIN_KEY: adminKey, ALLOWED_ORIGINS: '', STUN_URLS: '' });
+const server = process.env.E2E_BASE_URL ? null : createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: adminKey, USERS_FILE: ':memory:', ALLOWED_ORIGINS: '', STUN_URLS: '' });
 if (server) { server.listen(0, '127.0.0.1'); await once(server, 'listening'); }
 const url = process.env.E2E_BASE_URL || `http://127.0.0.1:${server.address().port}/`;
 const browser = await chromium.launch({ ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
@@ -41,6 +41,7 @@ async function page(name) {
 try {
   const host = await page('host'); await host.goto(url);
   await host.screenshot({ path: 'test-results/lobby.png', fullPage: true });
+  await host.locator('#username').fill(process.env.E2E_USERNAME || 'admin');
   await host.locator('#admin-key').fill(adminKey);
   await host.locator('#devices-button').click();
   await host.locator('#camera2').selectOption('test-camera-2');

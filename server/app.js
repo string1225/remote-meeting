@@ -2,16 +2,20 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { randomBytes, randomUUID, timingSafeEqual, createHmac } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
+import { createUserStore } from './users.js';
 
 const token = () => randomBytes(24).toString('base64url');
 const equal = (a, b) => typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const split = value => (value || '').split(',').map(v => v.trim()).filter(Boolean);
-const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']]]);
+const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/accounts.js', ['accounts.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']]]);
 
 export function createMeetingServer(options = {}) {
   const env = { ...process.env, ...options };
-  const adminKey = env.ADMIN_KEY;
-  if (!adminKey || adminKey.length < 24 || adminKey.startsWith('replace-')) throw new Error('Set ADMIN_KEY to a random secret of at least 24 characters.');
+  const users = createUserStore({ file: env.USERS_FILE, bootstrapPassword: env.BOOTSTRAP_ADMIN_PASSWORD || env.ADMIN_KEY, bootstrapUsername: env.BOOTSTRAP_ADMIN_USERNAME || 'admin' });
+  const sessions = new Map();
+  const sessionTTL = 8 * 3600_000;
+  const cookiePath = env.COOKIE_PATH || '/';
+  if (!/^\/[A-Za-z0-9/_-]*$/.test(cookiePath)) throw new Error('Invalid COOKIE_PATH');
   const allowedOrigins = split(env.ALLOWED_ORIGINS);
   const ttl = Number(env.ROOM_TTL_HOURS || 8) * 3600_000;
   if (!Number.isFinite(ttl) || ttl <= 0 || ttl > 86400_000) throw new Error('ROOM_TTL_HOURS must be between 0 and 24.');
@@ -42,6 +46,36 @@ export function createMeetingServer(options = {}) {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(data));
   }
+  function sessionFor(req) {
+    const key = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith('meeting_session='))?.slice(16);
+    const session = sessions.get(key);
+    if (!session || session.expiresAt <= Date.now()) { sessions.delete(key); return null; }
+    const user = users.get(session.userId);
+    return user?.enabled ? { key, user } : null;
+  }
+  function cookie(req, value, maxAge) {
+    const secure = req.socket.encrypted || (env.TRUST_PROXY === 'true' && req.headers['x-forwarded-proto'] === 'https');
+    return `meeting_session=${value}; Path=${cookiePath}; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
+  }
+  async function body(req) {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > 4096) throw Object.assign(new Error('请求内容过长'), { status: 413 });
+      chunks.push(chunk);
+    }
+    try { const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')); if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(); return parsed; }
+    catch { throw Object.assign(new Error('无效的请求内容'), { status: 400 }); }
+  }
+  function endRoom(room) {
+    rooms.delete(room.id);
+    for (const p of room.peers.values()) { send(p.ws, { type: 'room-ended' }); p.ws.close(1000, 'Room ended'); }
+  }
+  function revokeUser(id) {
+    for (const [key, session] of sessions) if (session.userId === id) sessions.delete(key);
+    for (const room of rooms.values()) if (room.ownerId === id) endRoom(room);
+  }
   const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -51,12 +85,54 @@ export function createMeetingServer(options = {}) {
     try {
       const path = new URL(req.url, 'http://localhost').pathname;
       if (req.method === 'GET' && path === '/api/health') return json(res, 200, { status: 'ok', mode: 'signaling-only' });
+      if (['POST', 'PATCH', 'DELETE'].includes(req.method) && !originAllowed(req.headers.origin, req)) return json(res, 403, { error: '不允许的访问来源' });
+      if (req.method === 'GET' && path === '/api/session') return json(res, 200, { user: sessionFor(req)?.user || null });
+      if (req.method === 'POST' && path === '/api/login') {
+        if (!rate(`login-ip:${address(req)}`, 20, 60_000)) return json(res, 429, { error: '登录尝试过于频繁，请一分钟后重试' });
+        const input = await body(req);
+        const name = typeof input.username === 'string' ? input.username.trim().toLowerCase() : '';
+        if (!/^[a-z0-9][a-z0-9_.-]{1,31}$/.test(name)) return json(res, 401, { error: '账号或口令不正确，或账号已停用' });
+        if (!rate(`login-account:${name}`, 10, 15 * 60_000)) return json(res, 429, { error: '此账号连续尝试过多，请 15 分钟后重试' });
+        const user = await users.authenticate(name, input.password);
+        if (!user) return json(res, 401, { error: '账号或口令不正确，或账号已停用' });
+        limits.delete(`login-account:${name}`);
+        if (sessions.size >= 1000) return json(res, 503, { error: '登录人数已达上限，请稍后重试' });
+        const old = sessionFor(req); if (old) sessions.delete(old.key);
+        const sessionToken = token();
+        sessions.set(sessionToken, { userId: user.id, expiresAt: Date.now() + sessionTTL });
+        res.setHeader('Set-Cookie', cookie(req, sessionToken, sessionTTL / 1000));
+        return json(res, 200, { user });
+      }
+      if (req.method === 'POST' && path === '/api/logout') {
+        const session = sessionFor(req); if (session) sessions.delete(session.key);
+        res.setHeader('Set-Cookie', cookie(req, '', 0));
+        return json(res, 200, { ok: true });
+      }
+      if (path === '/api/users' || path.startsWith('/api/users/')) {
+        const session = sessionFor(req);
+        if (!session) return json(res, 401, { error: '请先登录' });
+        if (session.user.role !== 'admin') return json(res, 403, { error: '只有管理员可以管理账号' });
+        if (req.method === 'GET' && path === '/api/users') return json(res, 200, { users: users.list() });
+        if (!rate(`user-edit:${session.user.id}`, 30)) return json(res, 429, { error: '操作过于频繁，请稍后重试' });
+        const input = ['POST', 'PATCH'].includes(req.method) ? await body(req) : {};
+        // Recheck after reading a body: another admin may have revoked this login.
+        if (sessionFor(req)?.user.role !== 'admin') return json(res, 401, { error: '登录已失效，请重新登录' });
+        if (req.method === 'POST' && path === '/api/users') return json(res, 201, { user: users.create(input) });
+        const id = path.slice('/api/users/'.length);
+        if (req.method === 'PATCH') {
+          const user = users.update(id, input);
+          if ('password' in input || !user.enabled || 'role' in input) revokeUser(id);
+          return json(res, 200, { user });
+        }
+        if (req.method === 'DELETE') { users.remove(id); revokeUser(id); return json(res, 200, { ok: true }); }
+        return json(res, 404, { error: 'Not found' });
+      }
       if (req.method === 'POST' && path === '/api/rooms') {
-        if (!originAllowed(req.headers.origin, req)) return json(res, 403, { error: '不允许的访问来源' });
         if (!rate(`create:${address(req)}`, 20)) return json(res, 429, { error: '创建过于频繁，请稍后重试' });
-        if (!equal(req.headers.authorization, `Bearer ${adminKey}`)) return json(res, 401, { error: '主持密钥不正确' });
+        const session = sessionFor(req);
+        if (!session) return json(res, 401, { error: '请先登录主持账号' });
         if (rooms.size >= 100) return json(res, 503, { error: '会议室已达上限' });
-        const room = { id: token(), hostToken: token(), guestToken: token(), expiresAt: Date.now() + ttl, peers: new Map() };
+        const room = { id: token(), ownerId: session.user.id, hostToken: token(), guestToken: token(), expiresAt: Date.now() + ttl, peers: new Map() };
         rooms.set(room.id, room);
         return json(res, 201, { room: room.id, hostToken: room.hostToken, guestToken: room.guestToken, expiresAt: room.expiresAt });
       }
@@ -67,7 +143,7 @@ export function createMeetingServer(options = {}) {
         return res.end(data);
       }
       json(res, 404, { error: 'Not found' });
-    } catch { if (!res.headersSent) json(res, 500, { error: '服务器错误' }); else res.end(); }
+    } catch (error) { if (!res.headersSent) json(res, error.status || 500, { error: error.status ? error.message : '服务器错误' }); else res.end(); }
   });
   server.headersTimeout = 15_000;
   server.requestTimeout = 15_000;
@@ -133,8 +209,7 @@ export function createMeetingServer(options = {}) {
             send(target.ws, { type: 'signal', from: peer.id, data: { candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex, usernameFragment: typeof c.usernameFragment === 'string' ? c.usernameFragment.slice(0, 256) : undefined } } });
           }
         } else if (msg.type === 'end-room' && peer.role === 'host') {
-          rooms.delete(room.id);
-          for (const p of room.peers.values()) { send(p.ws, { type: 'room-ended' }); p.ws.close(1000, 'Room ended'); }
+          endRoom(room);
         }
       } catch { fail('INVALID', '无法解析消息'); }
     });
@@ -147,10 +222,8 @@ export function createMeetingServer(options = {}) {
   });
   const cleanup = setInterval(() => {
     for (const ws of wss.clients) { if (!ws.alive) ws.terminate(); else { ws.alive = false; ws.ping(); } }
-    for (const [id, room] of rooms) if (room.expiresAt < Date.now()) {
-      rooms.delete(id);
-      for (const p of room.peers.values()) { send(p.ws, { type: 'room-ended' }); p.ws.close(1000, 'Expired'); }
-    }
+    for (const room of rooms.values()) if (room.expiresAt < Date.now()) endRoom(room);
+    for (const [key, session] of sessions) if (session.expiresAt < Date.now()) sessions.delete(key);
     for (const [key, entry] of limits) if (entry.until < Date.now()) limits.delete(key);
   }, 30_000);
   cleanup.unref();

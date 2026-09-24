@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { createMeetingServer } from '../server/app.js';
 
 const key = 'hardware-test-only-secret-32-chars';
-const server = createMeetingServer({ ADMIN_KEY: key, ALLOWED_ORIGINS: '', STUN_URLS: '' });
+const server = createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: key, USERS_FILE: ':memory:', ALLOWED_ORIGINS: '', STUN_URLS: '' });
 server.listen(0, '127.0.0.1'); await once(server, 'listening');
 const browser = await chromium.launch({ ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true, args: ['--use-fake-ui-for-media-stream'] });
 try {

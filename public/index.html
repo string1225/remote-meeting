@@ -17,7 +17,13 @@
         <div class="section-top"><span class="step">01</span><h2 id="setup-title">开始一场会议</h2></div>
         <form id="setup-form">
           <label>你的称呼<input id="name" maxlength="40" value="现场主持人" required autocomplete="nickname"></label>
-          <label id="admin-field">主持密钥<input id="admin-key" type="password" autocomplete="off" placeholder="输入部署时生成的密钥"></label>
+          <div id="admin-field" class="auth-panel">
+            <div id="login-fields">
+              <div class="form-pair"><label>主持账号<input id="username" value="admin" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false"></label><label>口令<input id="admin-key" type="password" autocomplete="current-password" maxlength="128" placeholder="输入你的口令"></label></div>
+              <button id="login" type="button" class="secondary full">登录账号</button>
+            </div>
+            <div id="signed-in" hidden><strong id="account-name"></strong><div class="account-actions"><button id="manage-users" type="button" class="secondary" hidden>账号管理</button><button id="logout" type="button" class="text-button">退出登录</button></div></div>
+          </div>
           <p id="guest-hint" hidden>你已收到邀请。可使用摄像头、仅麦克风或旁听加入。</p>
           <label>参与方式<select id="mode"><option value="host">现场主持 · 双摄像头 + 麦克风</option><option value="video">摄像头 + 麦克风</option><option value="audio">仅麦克风</option><option value="listen">旁听 · 不开启设备</option></select></label>
           <button id="devices-button" type="button" class="secondary full">授权并检测设备</button>
@@ -38,6 +44,23 @@
       <div class="workspace"><div><div id="video-grid" class="video-grid"></div><div id="empty-state" class="empty-state">等待伙伴加入。画面和声音连接后会显示在这里。</div></div><aside class="panel"><div class="section-top"><span class="live-dot"></span><h2>会议状态</h2></div><div id="signal-status">正在连接…</div><div id="participants"></div><div class="side-note"><b>直连优先</b><p>阿里云仅承载网页和连接信令。现场两路画面分别发送给两位伙伴。</p><p>若网络阻止直连，尝试手机热点，或由管理员配置独立 TURN 服务。</p></div><p id="expiry" class="hint"></p></aside></div>
       <div class="controls"><button id="mute" class="secondary">关闭麦克风</button><button id="camera-toggle" class="secondary">关闭摄像头</button><button id="leave" class="danger">离开会议</button><button id="end-room" class="text-button" hidden>结束所有人的会议</button></div>
     </section>
+    <dialog id="users-dialog" aria-labelledby="users-title">
+      <div class="dialog-top"><div><span class="eyebrow">HOST ACCOUNTS</span><h2 id="users-title">主持账号管理</h2></div><button id="close-users" type="button" class="secondary" aria-label="关闭账号管理">关闭</button></div>
+      <p class="hint">每个账号有独立口令，至少 6 位。管理员可管理账号，主持人可创建会议。重置口令、停用或删除账号会使该账号退出登录，并结束其正在进行的会议。</p>
+      <p id="users-message" role="status" hidden></p>
+      <div id="users-list"></div>
+      <form id="reset-user-form" class="account-form" hidden>
+        <h3 id="reset-user-title">重置口令</h3>
+        <label>新口令<input id="reset-password" type="password" minlength="6" maxlength="128" autocomplete="new-password" required placeholder="至少 6 位"></label>
+        <div class="account-actions"><button type="submit" class="primary">保存新口令</button><button id="cancel-reset" type="button" class="secondary">取消</button></div>
+      </form>
+      <form id="create-user-form" class="account-form">
+        <h3>新增账号</h3>
+        <div class="form-pair"><label>账号<input id="new-username" minlength="2" maxlength="32" pattern="[a-zA-Z0-9][a-zA-Z0-9_.\-]{1,31}" autocomplete="off" autocapitalize="none" spellcheck="false" required placeholder="如 host1"></label><label>称呼<input id="new-display-name" maxlength="40" autocomplete="off" placeholder="如 现场主持人"></label></div>
+        <div class="form-pair"><label>口令<input id="new-password" type="password" minlength="6" maxlength="128" autocomplete="new-password" required placeholder="至少 6 位"></label><label>账号类型<select id="new-role"><option value="host">主持人</option><option value="admin">管理员</option></select></label></div>
+        <button type="submit" class="primary full">新增账号 <span>＋</span></button>
+      </form>
+    </dialog>
     <div id="message" role="status" aria-live="polite" hidden></div>
   </main>
   <footer><span>同屏 / REMOTE MEETING</span><span>小规模会议，保持直接。</span></footer>
