@@ -4,10 +4,10 @@ import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { createMeetingServer } from '../server/app.js';
 
-const adminKey = 'e2e-test-only-admin-key-32-characters';
-const server = createMeetingServer({ ADMIN_KEY: adminKey, ALLOWED_ORIGINS: '', STUN_URLS: '' });
-server.listen(0, '127.0.0.1'); await once(server, 'listening');
-const url = `http://127.0.0.1:${server.address().port}/`;
+const adminKey = process.env.E2E_ADMIN_KEY || 'e2e-test-only-admin-key-32-characters';
+const server = process.env.E2E_BASE_URL ? null : createMeetingServer({ ADMIN_KEY: adminKey, ALLOWED_ORIGINS: '', STUN_URLS: '' });
+if (server) { server.listen(0, '127.0.0.1'); await once(server, 'listening'); }
+const url = process.env.E2E_BASE_URL || `http://127.0.0.1:${server.address().port}/`;
 const browser = await chromium.launch({ ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
 const errors = [];
 await mkdir('test-results', { recursive: true });
@@ -102,4 +102,4 @@ try {
     console.error(await p.evaluate(() => ({ message: document.querySelector('#message')?.textContent, participants: document.querySelector('#participants')?.textContent, events: window.testEvents, pcs: window.testPeers?.map(pc => ({ state: pc.connectionState, signaling: pc.signalingState, ice: pc.iceConnectionState, senders: pc.getSenders().map(s => s.track?.readyState) })) })));
   }
   throw error;
-} finally { await browser.close(); await server.shutdown(); }
+} finally { await browser.close(); if (server) await server.shutdown(); }
