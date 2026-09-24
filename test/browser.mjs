@@ -14,10 +14,10 @@ await mkdir('test-results', { recursive: true });
 async function page(name) {
   const context = await browser.newContext({ permissions: ['camera', 'microphone'], viewport: { width: 1440, height: 1000 } });
   await context.addInitScript(() => {
-    window.testPeers = []; window.testSockets = []; window.testTracks = [];
+    window.testPeers = []; window.testSockets = []; window.testTracks = []; window.testEvents = [];
     const NativePC = window.RTCPeerConnection, NativeWS = window.WebSocket;
-    window.RTCPeerConnection = class extends NativePC { constructor(...args) { super(...args); window.testPeers.push(this); } };
-    window.WebSocket = class extends NativeWS { constructor(...args) { super(...args); window.testSockets.push(this); } };
+    window.RTCPeerConnection = class extends NativePC { constructor(...args) { super(...args); window.testPeers.push(this); for (const e of ['negotiationneeded', 'signalingstatechange', 'iceconnectionstatechange']) this.addEventListener(e, () => window.testEvents.push([window.testPeers.indexOf(this), e, this.signalingState])); } };
+    window.WebSocket = class extends NativeWS { constructor(...args) { super(...args); window.testSockets.push(this); } send(data) { const m = JSON.parse(data); window.testEvents.push(['send', m.type, m.to, m.data?.description?.type, m.data?.description?.sdp?.length]); super.send(data); } };
     const nativeCapture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     const enumerate = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
     navigator.mediaDevices.enumerateDevices = async () => [...(await enumerate()).filter(d => d.kind !== 'videoinput'), ...[1, 2].map(i => ({ kind: 'videoinput', deviceId: `test-camera-${i}`, label: `Test camera ${i}`, groupId: `camera-${i}` }))];
@@ -99,7 +99,7 @@ try {
   console.log('PASS: real WebRTC dual-camera/video/audio across 3 browser contexts; room limit; mute; reconnect; receive-only rejoin; room end; mobile layout.');
 } catch (error) {
   for (const context of browser.contexts()) for (const p of context.pages()) {
-    console.error(await p.evaluate(() => ({ message: document.querySelector('#message')?.textContent, participants: document.querySelector('#participants')?.textContent, pcs: window.testPeers?.map(pc => ({ state: pc.connectionState, signaling: pc.signalingState, ice: pc.iceConnectionState })) })));
+    console.error(await p.evaluate(() => ({ message: document.querySelector('#message')?.textContent, participants: document.querySelector('#participants')?.textContent, events: window.testEvents, pcs: window.testPeers?.map(pc => ({ state: pc.connectionState, signaling: pc.signalingState, ice: pc.iceConnectionState, senders: pc.getSenders().map(s => s.track?.readyState) })) })));
   }
   throw error;
 } finally { await browser.close(); await server.shutdown(); }

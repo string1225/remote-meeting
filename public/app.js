@@ -162,7 +162,7 @@ function connect() {
         reconnectAttempt = 0;
         $('signal-status').textContent = '● 信令在线 · 音视频独立传输';
         $('expiry').textContent = `会议有效至 ${new Date(message.expiresAt).toLocaleString()}`;
-        for (const info of message.peers) createPeer(info);
+        for (const info of message.peers) createPeer(info, true);
         updateParticipants();
       } else if (message.type === 'peer-joined') createPeer(message.peer);
       else if (message.type === 'peer-left') removePeer(message.id);
@@ -182,13 +182,16 @@ function connect() {
   };
   ws.onerror = () => {};
 }
-function createPeer(info) {
+function createPeer(info, initiate = false) {
   if (peers.has(info.id)) return peers.get(info.id);
   const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: 'all', bundlePolicy: 'max-bundle' });
-  const peer = { pc, info, polite: self.id.localeCompare(info.id) > 0, makingOffer: false, ignoreOffer: false, settingAnswer: false, queue: Promise.resolve(), candidates: [], labels: new Map(), streams: new Map(), status: '正在建立点对点连接', retries: 0 };
+  const peer = { pc, info, started: initiate, polite: self.id.localeCompare(info.id) > 0, makingOffer: false, ignoreOffer: false, settingAnswer: false, queue: Promise.resolve(), candidates: [], labels: new Map(), streams: new Map(), status: '正在建立点对点连接', retries: 0 };
   peers.set(info.id, peer);
   pc.onicecandidate = ({ candidate }) => { if (candidate) signal(info.id, { candidate: candidate.toJSON() }); };
   pc.onnegotiationneeded = async () => {
+    // The newcomer starts each initial exchange. This avoids simultaneous initial
+    // offers (and ICE rollback bugs) while keeping perfect negotiation for changes.
+    if (!peer.started) return;
     try {
       peer.makingOffer = true;
       await pc.setLocalDescription();
@@ -227,6 +230,7 @@ async function receiveSignal(peer, data) {
     const collision = description.type === 'offer' && !readyForOffer;
     peer.ignoreOffer = !peer.polite && collision;
     if (peer.ignoreOffer) return;
+    peer.started = true;
     for (const item of data.streams || []) peer.labels.set(item.id, item.label);
     peer.settingAnswer = description.type === 'answer';
     try { await pc.setRemoteDescription(description); } finally { peer.settingAnswer = false; }
