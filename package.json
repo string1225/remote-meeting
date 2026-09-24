@@ -1,0 +1,17 @@
+{
+  "name": "remote-meeting",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Three-person, dual-camera WebRTC meeting with signaling-only hosting",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --watch --env-file-if-exists=.env server/index.js",
+    "test": "node --test test/*.test.js",
+    "test:e2e": "node test/browser.mjs",
+    "check": "node --check server/index.js && node --check server/app.js && node --check public/app.js"
+  },
+  "dependencies": { "ws": "^8.18.3" },
+  "devDependencies": { "playwright": "^1.55.0" }
+}
