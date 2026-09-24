@@ -4,11 +4,14 @@ import { randomInt } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { createMeetingServer } from '../server/app.js';
+import { WebSocket } from 'ws';
 
 const password = process.env.E2E_ADMIN_KEY || '12345678';
-const server = process.env.E2E_BASE_URL ? null : createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: password, USERS_FILE: ':memory:', ALLOWED_ORIGINS: '', STUN_URLS: '' });
+const server = process.env.E2E_BASE_URL ? null : createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: password, USERS_FILE: ':memory:', HOST_AGENT_KEY: 'account-test-machine-key-at-least-32-chars', ALLOWED_ORIGINS: '', STUN_URLS: '' });
 if (server) { server.listen(0, '127.0.0.1'); await once(server, 'listening'); }
 const url = process.env.E2E_BASE_URL || `http://127.0.0.1:${server.address().port}/`;
+let mockHost;
+if (server) { mockHost = new WebSocket(new URL('agent', url).href.replace('http:', 'ws:'), { headers: { Authorization: 'Bearer account-test-machine-key-at-least-32-chars' } }); await once(mockHost, 'open'); }
 const username = `test_${Date.now().toString(36)}`;
 const hostPassword = String(randomInt(10000000, 100000000)), newPassword = String(randomInt(10000000, 100000000));
 const browser = await chromium.launch({ ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true });
@@ -59,13 +62,13 @@ try {
   await host.locator('#admin-key').fill(newPassword);
   await host.locator('#login').click(); await host.locator('#signed-in').waitFor();
   await row.locator('[data-action=toggle]').click();
-  await row.getByText('主持人 · 已停用', { exact: true }).waitFor();
+  await row.getByText('远端用户 · 已停用', { exact: true }).waitFor();
   await host.reload(); await host.locator('#login-fields').waitFor();
   await host.locator('#username').fill(username); await host.locator('#admin-key').fill(newPassword);
   await host.locator('#login').click();
   await host.waitForFunction(() => document.querySelector('#message').textContent.includes('不正确'));
   await row.locator('[data-action=toggle]').click();
-  await row.getByText('主持人 · 已启用', { exact: true }).waitFor();
+  await row.getByText('远端用户 · 已启用', { exact: true }).waitFor();
   await host.locator('#login').click(); await host.locator('#signed-in').waitFor();
   await row.locator('[data-action=delete]').click(); await row.waitFor({ state: 'detached' });
   await host.reload(); await host.locator('#login-fields').waitFor();
@@ -79,5 +82,5 @@ try {
       const user = (await response.json()).users.find(u => u.username === username);
       if (user) await context.request.delete(new URL(`api/users/${user.id}`, url).href, { headers: { Origin: new URL(url).origin } });
     }
-  } finally { await browser.close(); if (server) await server.shutdown(); }
+  } finally { await browser.close(); if (mockHost) mockHost.terminate(); if (server) await server.shutdown(); }
 }

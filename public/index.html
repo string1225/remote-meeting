@@ -1,52 +1,25 @@
 <!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#111827">
-  <title>同屏 · 三方远程会议</title>
-  <link rel="stylesheet" href="./style.css">
-  <script type="module" src="./app.js"></script>
-</head>
-<body>
-  <header><a class="brand" href="./"><span class="brand-icon">◈</span> 同屏 <small>REMOTE MEETING</small></a><span class="badge"><i></i> WebRTC 实时会议</span></header>
-  <main>
-    <section id="lobby" class="lobby">
-      <div class="intro"><span class="eyebrow">TWO CAMERAS. THREE PERSPECTIVES.</span><h1>两个视角，<br>同一个现场。</h1><p>分享现场的两路画面，与远方的伙伴面对面。<br>音视频点对点传输，让协作更接近彼此。</p><div class="features"><span>双摄像头</span><span>三方通话</span><span>端到端媒体加密</span></div><div class="flow"><b>现场双摄</b><span>⇄</span><b>远端伙伴 × 2</b><small>云端只负责连接信令</small></div></div>
-      <div class="setup panel">
-        <div class="section-top"><span class="step">01</span><h2 id="setup-title">开始一场会议</h2></div>
-        <form id="setup-form">
-          <label>你的称呼<input id="name" maxlength="40" value="现场主持人" required autocomplete="nickname"></label>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 远程现场</title><link rel="stylesheet" href="./style.css"><script type="module" src="./app.js"></script></head>
+<body><header><a class="brand" href="./"><span class="brand-icon">◈</span> 同屏 <small>REMOTE WORKSPACE</small></a><span class="badge"><i></i> 远程现场</span></header><main>
+<section id="lobby" class="lobby"><div class="intro"><span class="eyebrow">YOUR WINDOW INTO THE DETAILS.</span><h1>连接现场，<br>看清每个细节。</h1><p>登录即可唤起现场主机的双摄像头与麦克风。<br>放大、移动视野，独立查看你关注的区域。</p><div class="features"><span>双摄高分辨率采集</span><span>独立视角</span><span>最高 1080p 局部串流</span></div><div class="flow"><b>现场常驻主机</b><span>⇄</span><b>远端网页 × 2</b><small>你的视野，由你控制。</small></div></div>
+<div class="setup panel"><div class="section-top"><span class="step">01</span><h2>连接现场主机</h2></div><form id="setup-form"><input id="name" type="hidden" value="远端用户">
           <div id="admin-field" class="auth-panel">
             <div id="login-fields">
-              <div class="form-pair"><label>主持账号<input id="username" value="admin" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false"></label><label>口令<input id="admin-key" type="password" autocomplete="current-password" maxlength="128" placeholder="输入你的口令"></label></div>
+              <div class="form-pair"><label>远端账号<input id="username" value="admin" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false"></label><label>口令<input id="admin-key" type="password" autocomplete="current-password" maxlength="128" placeholder="输入你的口令"></label></div>
               <button id="login" type="button" class="secondary full">登录账号</button>
             </div>
             <div id="signed-in" hidden><strong id="account-name"></strong><div class="account-actions"><button id="manage-users" type="button" class="secondary" hidden>账号管理</button><button id="logout" type="button" class="text-button">退出登录</button></div></div>
           </div>
-          <p id="guest-hint" hidden>你已收到邀请。可使用摄像头、仅麦克风或旁听加入。</p>
-          <label>参与方式<select id="mode"><option value="host">现场主持 · 双摄像头 + 麦克风</option><option value="video">摄像头 + 麦克风</option><option value="audio">仅麦克风</option><option value="listen">旁听 · 不开启设备</option></select></label>
-          <button id="devices-button" type="button" class="secondary full">授权并检测设备</button>
-          <div id="device-fields" hidden>
-            <label id="camera1-field">摄像头 1<select id="camera1"></select></label>
-            <label id="camera2-field">摄像头 2<select id="camera2"></select></label>
-            <label id="mic-field">麦克风<select id="microphone"></select></label>
-            <label id="quality-field">画面质量<select id="quality"><option value="720">流畅 · 720p / 24fps</option><option value="1080">清晰 · 1080p / 24fps</option><option value="360">省流 · 360p / 20fps</option></select></label>
-          </div>
-          <div id="preview" class="preview-grid"></div>
-          <button id="join-button" type="submit" class="primary full">创建并进入会议 <span>↗</span></button>
-          <p class="hint">浏览器会请求设备权限。现场模式需要两个独立摄像头；请优先使用最新版 Edge 或 Chrome。</p>
-        </form>
-      </div>
-    </section>
-    <section id="meeting" hidden>
-      <div class="meeting-top"><div><span class="eyebrow">LIVE WORKSPACE</span><h1>远程会议 <span id="people-count">1 / 3</span></h1></div><div class="meeting-actions"><button id="invite" class="secondary" hidden>复制邀请链接</button><button id="play-audio" class="secondary">播放远端声音</button></div></div>
-      <div class="workspace"><div><div id="video-grid" class="video-grid"></div><div id="empty-state" class="empty-state">等待伙伴加入。画面和声音连接后会显示在这里。</div></div><aside class="panel"><div class="section-top"><span class="live-dot"></span><h2>会议状态</h2></div><div id="signal-status">正在连接…</div><div id="participants"></div><div class="side-note"><b>直连优先</b><p>阿里云仅承载网页和连接信令。现场两路画面分别发送给两位伙伴。</p><p>若网络阻止直连，尝试手机热点，或由管理员配置独立 TURN 服务。</p></div><p id="expiry" class="hint"></p></aside></div>
-      <div class="controls"><button id="mute" class="secondary">关闭麦克风</button><button id="camera-toggle" class="secondary">关闭摄像头</button><button id="leave" class="danger">离开会议</button><button id="end-room" class="text-button" hidden>结束所有人的会议</button></div>
-    </section>
+
+<p id="host-status" class="host-status">登录后查看主机状态</p><label>参与方式<select id="mode"><option value="video">摄像头 + 麦克风</option><option value="audio">仅麦克风</option><option value="listen">旁听 · 不开启设备</option></select></label>
+<button id="devices-button" type="button" class="secondary full">检测我的摄像头和麦克风</button><div id="device-fields" hidden><label id="camera1-field">我的摄像头<select id="camera1"></select></label><label id="mic-field">我的麦克风<select id="microphone"></select></label></div>
+<button id="join-button" type="submit" class="primary full">登录并连接主机 <span>↗</span></button><p class="hint">连接后，主机自动开启两路摄像头和麦克风。最多两位远端同时接入；请使用耳机避免回声。</p></form></div></section>
+<section id="meeting" hidden><div class="meeting-top"><div><span class="eyebrow">LIVE REMOTE WORKSPACE</span><h1>现场双视角 <span id="people-count">1 / 3</span></h1><p id="capture-info" class="hint">等待主机开启设备…</p></div><button id="play-audio" class="secondary">播放远端声音</button></div>
+<div class="workspace"><div><div id="host-videos" class="video-grid"></div><div id="empty-state" class="empty-state">正在唤起主机。两路摄像头画面将在这里显示。</div><h2 class="remote-heading">远端参与者</h2><div id="remote-videos" class="remote-grid"></div><div id="remote-audio"></div></div><aside class="panel"><div class="section-top"><span class="live-dot"></span><h2>连接状态</h2></div><div id="signal-status">正在连接…</div><div id="participants"></div><div class="side-note"><b>每人独立控制视野</b><p>滚轮或滑块放大；拖动画面移动视野。定位框显示当前查看区域，点击“全景复位”返回全景。</p><p>主机从高分辨率原始画面裁剪后发送最高 1080p 串流，720p 摄像头保持 720p。你的操作不影响另一位远端。</p></div></aside></div>
+<div class="controls"><button id="mute" class="secondary">关闭麦克风</button><button id="camera-toggle" class="secondary">关闭摄像头</button><button id="leave" class="danger">断开主机</button></div></section>
     <dialog id="users-dialog" aria-labelledby="users-title">
-      <div class="dialog-top"><div><span class="eyebrow">HOST ACCOUNTS</span><h2 id="users-title">主持账号管理</h2></div><button id="close-users" type="button" class="secondary" aria-label="关闭账号管理">关闭</button></div>
-      <p class="hint">每个账号有独立口令，至少 6 位。管理员可管理账号，主持人可创建会议。重置口令、停用或删除账号会使该账号退出登录，并结束其正在进行的会议。</p>
+      <div class="dialog-top"><div><span class="eyebrow">HOST ACCOUNTS</span><h2 id="users-title">远端账号管理</h2></div><button id="close-users" type="button" class="secondary" aria-label="关闭账号管理">关闭</button></div>
+      <p class="hint">每个账号有独立口令，至少 6 位。管理员可管理账号，远端用户可连接主机。重置口令、停用或删除账号会使该账号退出登录，并断开该账号的远端连接。</p>
       <p id="users-message" role="status" hidden></p>
       <div id="users-list"></div>
       <form id="reset-user-form" class="account-form" hidden>
@@ -56,8 +29,8 @@
       </form>
       <form id="create-user-form" class="account-form">
         <h3>新增账号</h3>
-        <div class="form-pair"><label>账号<input id="new-username" minlength="2" maxlength="32" pattern="[a-zA-Z0-9][a-zA-Z0-9_.\-]{1,31}" autocomplete="off" autocapitalize="none" spellcheck="false" required placeholder="如 host1"></label><label>称呼<input id="new-display-name" maxlength="40" autocomplete="off" placeholder="如 现场主持人"></label></div>
-        <div class="form-pair"><label>口令<input id="new-password" type="password" minlength="6" maxlength="128" autocomplete="new-password" required placeholder="至少 6 位"></label><label>账号类型<select id="new-role"><option value="host">主持人</option><option value="admin">管理员</option></select></label></div>
+        <div class="form-pair"><label>账号<input id="new-username" minlength="2" maxlength="32" pattern="[a-zA-Z0-9][a-zA-Z0-9_.\-]{1,31}" autocomplete="off" autocapitalize="none" spellcheck="false" required placeholder="如 host1"></label><label>称呼<input id="new-display-name" maxlength="40" autocomplete="off" placeholder="如 现场远端用户"></label></div>
+        <div class="form-pair"><label>口令<input id="new-password" type="password" minlength="6" maxlength="128" autocomplete="new-password" required placeholder="至少 6 位"></label><label>账号类型<select id="new-role"><option value="host">远端用户</option><option value="admin">管理员</option></select></label></div>
         <button type="submit" class="primary full">新增账号 <span>＋</span></button>
       </form>
     </dialog>

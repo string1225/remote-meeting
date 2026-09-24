@@ -1,0 +1,11 @@
+{
+  "serverUrl": "https://home.sunny-string.cn/meeting/",
+  "agentKey": "replace-with-the-server-HOST_AGENT_KEY",
+  "port": 3034,
+  "nodePath": "C:\\Program Files\\nodejs\\node.exe",
+  "browserPath": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "cameras": [],
+  "microphone": "",
+  "idleMs": 3000,
+  "headless": false
+}

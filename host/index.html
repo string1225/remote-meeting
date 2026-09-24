@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 现场主机</title><link rel="stylesheet" href="/style.css"><script type="module" src="/host-app.js"></script></head>
+<body><header><span class="brand">◈ 同屏 · 现场主机</span><span id="connection" class="badge">正在上线…</span></header><main>
+<div class="meeting-top"><div><span class="eyebrow">LOCAL HOST</span><h1>现场控制台 <span id="people-count">0 / 2 位远端</span></h1></div><button id="pause" class="danger">暂停远端接入</button></div>
+<div class="panel"><strong id="capture-status">待机 · 等待远端登录连接</strong><p class="hint">首位远端进入后自动开启两路摄像头和麦克风。原始画面留在本机，每位远端独立接收自己的两路 最高 1080p 裁剪画面。最后一位离开后自动释放设备。</p><p id="error" role="status" hidden></p><div id="sources" class="host-sources"></div></div>
+<h2>远端参与者</h2><div id="remote-media" class="video-grid"></div><div id="remote-audio"></div><div id="participants"></div><button id="play-audio" class="secondary">播放远端声音</button>
+</main><footer>此窗口由主机常驻程序管理；关闭窗口后会自动恢复。暂停接入请使用上方按钮。</footer></body></html>

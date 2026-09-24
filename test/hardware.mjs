@@ -1,28 +1,24 @@
-// Explicit, opt-in local hardware check. Captures two real cameras and a mic.
-// Media stays on this computer; no remote participant is connected.
-import { once } from 'node:events';
+// Opt-in real device acceptance: no external participants; media remains local.
+import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { createMeetingServer } from '../server/app.js';
-
-const key = 'hardware-test-only-secret-32-chars';
-const server = createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: key, USERS_FILE: ':memory:', ALLOWED_ORIGINS: '', STUN_URLS: '' });
-server.listen(0, '127.0.0.1'); await once(server, 'listening');
-const browser = await chromium.launch({ ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true, args: ['--use-fake-ui-for-media-stream'] });
+import { localStack, launchOptions, remotePage, connectRemote, setView } from './browser-fixture.mjs';
+const stack = await localStack({ hardware: true });
+const browser = await chromium.launch({ ...launchOptions, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
 try {
-  const context = await browser.newContext({ permissions: ['camera', 'microphone'] });
-  const page = await context.newPage();
-  await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  await page.locator('#admin-key').fill(key);
-  await page.locator('#devices-button').click();
-  await page.waitForFunction(() => !document.querySelector('#device-fields').hidden);
-  const cameras = await page.locator('#camera1 option').evaluateAll(options => options.map(o => ({ value: o.value, label: o.textContent })).filter(o => !/\bIR\b|infrared|红外/i.test(o.label)));
-  if (cameras.length < 2) throw new Error('Two non-infrared cameras are required for this check.');
-  await page.locator('#camera1').selectOption(cameras[0].value);
-  await page.locator('#camera2').selectOption(cameras[1].value);
-  await page.locator('#join-button').click();
-  await page.waitForFunction(() => document.querySelectorAll('.video-card video').length === 2 && [...document.querySelectorAll('.video-card video')].every(v => v.readyState >= 2 && v.videoWidth > 0));
-  const video = await page.locator('.video-card video').evaluateAll(videos => videos.map(v => ({ width: v.videoWidth, height: v.videoHeight, readyState: v.srcObject.getVideoTracks()[0].readyState })));
-  console.log(JSON.stringify({ cameras: cameras.slice(0, 2).map(c => c.label), microphone: await page.locator('#microphone option:checked').textContent(), video }, null, 2));
-  await page.locator('#leave').click();
-  console.log('PASS: both physical cameras and microphone opened simultaneously; local previews rendered; devices released.');
-} finally { await browser.close(); await server.shutdown(); }
+  const remote = await remotePage(browser, stack.errors);
+  assert.equal(await stack.host.evaluate(() => window.testTracks.length), 0);
+  await connectRemote(remote, stack.url, stack.password);
+  await remote.waitForFunction(() => document.querySelectorAll('#host-videos video').length === 2 && [...document.querySelectorAll('#host-videos video')].every(v => [720,1080].includes(v.videoHeight) && v.videoWidth === v.videoHeight * 16 / 9 && v.readyState >= 2), null, { timeout: 60000 });
+  const devices = await stack.host.evaluate(() => { const d = window.hostDiagnostics(); return { cameras: d.capture.sources.map(s => ({ label: s.label, actual: { width:s.settings.width,height:s.settings.height,fps:s.settings.frameRate }, capabilities: { width:s.capabilities.width,height:s.capabilities.height } })), microphone: d.capture.audio.getAudioTracks()[0].label }; });
+  const received = await remote.locator('#host-videos video').evaluateAll(videos => videos.map(v => ({ width: v.videoWidth, height: v.videoHeight })));
+  assert.deepEqual(received, [{width:1920,height:1080},{width:1280,height:720}]);
+  console.log(JSON.stringify({ ...devices, received }, null, 2));
+  await setView(remote, 0, 2, 0.25); await setView(remote, 1, 2, 0.75);
+  await stack.host.waitForFunction(() => [...window.hostDiagnostics().peers.values()][0].media.filter(m=>m.kind==='video').every(m=>m.view.zoom===2));
+  assert.equal(await stack.host.evaluate(() => { const d=window.hostDiagnostics(); return [...d.peers.values()].every(p=>p.pc.getSenders().filter(s=>s.track?.kind==='video').every(s=>!d.capture.sources.some(c=>c.stream.getVideoTracks().includes(s.track)))); }), true);
+  await remote.locator('#leave').click();
+  await stack.host.waitForFunction(() => window.hostDiagnostics().capture === null && window.testTracks.every(t=>t.readyState==='ended'));
+  assert.deepEqual(stack.errors, []);
+  console.log('PASS: actual dual-camera highest-resolution capture, microphone, 1080p + native 720p source crops received over WebRTC, and idle device release.');
+} catch (e) { console.error(await stack.host.locator('#error').textContent()); throw e; }
+finally { await browser.close(); await stack.close(); }

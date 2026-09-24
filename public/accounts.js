@@ -14,7 +14,8 @@ export function initAccounts(notify) {
     $('login-fields').hidden = !!account;
     $('signed-in').hidden = !account;
     $('manage-users').hidden = account?.role !== 'admin';
-    $('account-name').textContent = account ? `${account.displayName} · ${account.username} / ${account.role === 'admin' ? '管理员' : '主持人'}` : '';
+    document.dispatchEvent(new Event('account-change'));
+    $('account-name').textContent = account ? `${account.displayName} · ${account.username} / ${account.role === 'admin' ? '管理员' : '远端用户'}` : '';
   }
   async function loadSession() { account = (await api('session')).user; render(); }
   const ready = loadSession().catch(() => {});
@@ -24,13 +25,13 @@ export function initAccounts(notify) {
     if (account) return account;
     account = (await api('login', 'POST', { username: $('username').value, password: $('admin-key').value })).user;
     $('admin-key').value = '';
-    if ($('name').value === '现场主持人') $('name').value = account.displayName;
+    if ($('name').value === '远端用户') $('name').value = account.displayName;
     render();
     return account;
   }
   $('login').onclick = async () => {
     $('login').disabled = true;
-    try { await ensureLoggedIn(); notify('登录成功，可以创建会议。'); }
+    try { await ensureLoggedIn(); notify('登录成功，可以连接主机。'); }
     catch (error) { notify(error.message, true); }
     finally { $('login').disabled = false; }
   };
@@ -57,19 +58,19 @@ export function initAccounts(notify) {
       const row = document.createElement('div'); row.className = 'account-row'; row.dataset.username = user.username;
       const info = document.createElement('div');
       const title = document.createElement('strong'); title.textContent = `${user.displayName} (${user.username})`;
-      const detail = document.createElement('small'); detail.textContent = `${user.role === 'admin' ? '管理员' : '主持人'} · ${user.enabled ? '已启用' : '已停用'}${user.id === account.id ? ' · 当前账号' : ''}`;
+      const detail = document.createElement('small'); detail.textContent = `${user.role === 'admin' ? '管理员' : '远端用户'} · ${user.enabled ? '已启用' : '已停用'}${user.id === account.id ? ' · 当前账号' : ''}`;
       info.append(title, detail);
       const actions = document.createElement('div'); actions.className = 'account-actions';
       const reset = button('重置口令', 'reset');
       reset.onclick = () => { resetId = user.id; $('reset-user-title').textContent = `设置 ${user.username} 的新口令`; $('reset-user-form').hidden = false; $('reset-password').value = ''; $('reset-password').focus(); };
       const toggle = button(user.enabled ? '停用' : '启用', 'toggle');
       toggle.onclick = () => {
-        if (user.enabled && !confirm(`停用 ${user.username}？该账号的登录和会议将立即失效。`)) return;
+        if (user.enabled && !confirm(`停用 ${user.username}？该账号的登录和连接将立即失效。`)) return;
         void change(toggle, () => api(`users/${user.id}`, 'PATCH', { enabled: !user.enabled }), user.enabled ? '账号已停用。' : '账号已启用。');
       };
       const remove = button('删除', 'delete'); remove.className = 'text-button';
       remove.onclick = () => {
-        if (confirm(`删除账号 ${user.username}？该账号的登录和会议将立即失效。`)) void change(remove, () => api(`users/${user.id}`, 'DELETE'), '账号已删除。');
+        if (confirm(`删除账号 ${user.username}？该账号的登录和连接将立即失效。`)) void change(remove, () => api(`users/${user.id}`, 'DELETE'), '账号已删除。');
       };
       actions.append(reset, toggle, remove); row.append(info, actions); return row;
     }));
@@ -103,7 +104,7 @@ export function initAccounts(notify) {
   };
   $('reset-user-form').onsubmit = event => {
     event.preventDefault();
-    void change(event.submitter, () => api(`users/${resetId}`, 'PATCH', { password: $('reset-password').value }), '新口令已保存，旧登录和会议已失效。');
+    void change(event.submitter, () => api(`users/${resetId}`, 'PATCH', { password: $('reset-password').value }), '新口令已保存，旧登录和连接已失效。');
   };
-  return { ensureLoggedIn };
+  return { ensureLoggedIn, current: () => account };
 }

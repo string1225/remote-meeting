@@ -1,106 +1,72 @@
 import assert from 'node:assert/strict';
-import { once } from 'node:events';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
-import { createMeetingServer } from '../server/app.js';
+import { localStack, launchOptions, remotePage, connectRemote, setView } from './browser-fixture.mjs';
 
-const adminKey = process.env.E2E_ADMIN_KEY || 'e2e-test-only-admin-key-32-characters';
-const server = process.env.E2E_BASE_URL ? null : createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: adminKey, USERS_FILE: ':memory:', ALLOWED_ORIGINS: '', STUN_URLS: '' });
-if (server) { server.listen(0, '127.0.0.1'); await once(server, 'listening'); }
-const url = process.env.E2E_BASE_URL || `http://127.0.0.1:${server.address().port}/`;
-const browser = await chromium.launch({ ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
-const errors = [];
-await mkdir('test-results', { recursive: true });
-async function page(name) {
-  const context = await browser.newContext({ permissions: ['camera', 'microphone'], viewport: { width: 1440, height: 1000 } });
-  await context.addInitScript(() => {
-    window.testPeers = []; window.testSockets = []; window.testTracks = []; window.testEvents = [];
-    const NativePC = window.RTCPeerConnection, NativeWS = window.WebSocket;
-    window.RTCPeerConnection = class extends NativePC { constructor(...args) { super(...args); window.testPeers.push(this); for (const e of ['negotiationneeded', 'signalingstatechange', 'iceconnectionstatechange']) this.addEventListener(e, () => window.testEvents.push([window.testPeers.indexOf(this), e, this.signalingState])); } };
-    window.WebSocket = class extends NativeWS { constructor(...args) { super(...args); window.testSockets.push(this); } send(data) { const m = JSON.parse(data); window.testEvents.push(['send', m.type, m.to, m.data?.description?.type, m.data?.description?.sdp?.length]); super.send(data); } };
-    const nativeCapture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-    const enumerate = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
-    navigator.mediaDevices.enumerateDevices = async () => [...(await enumerate()).filter(d => d.kind !== 'videoinput'), ...[1, 2].map(i => ({ kind: 'videoinput', deviceId: `test-camera-${i}`, label: `Test camera ${i}`, groupId: `camera-${i}` }))];
-    navigator.mediaDevices.getUserMedia = async constraints => {
-      if (constraints.video?.deviceId?.exact?.startsWith('test-camera-')) {
-        const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 360;
-        const ctx = canvas.getContext('2d'); const second = constraints.video.deviceId.exact.endsWith('2');
-        let counter = 0;
-        const draw = () => { ctx.fillStyle = second ? '#16756a' : '#24364a'; ctx.fillRect(0, 0, 640, 360); ctx.fillStyle = '#fff'; ctx.font = '36px sans-serif'; ctx.fillText(`Camera ${second ? 2 : 1} / frame ${counter++}`, 30, 170); };
-        draw(); const timer = setInterval(draw, 100); const stream = canvas.captureStream(10);
-        stream.getTracks()[0].addEventListener('ended', () => clearInterval(timer));
-        window.testTracks.push(...stream.getTracks()); return stream;
-      }
-      const stream = await nativeCapture(constraints); window.testTracks.push(...stream.getTracks()); return stream;
-    };
-  });
-  const p = await context.newPage();
-  p.on('pageerror', error => errors.push(`${name}: ${error.message}`));
-  return p;
-}
+const live = !!process.env.E2E_BASE_URL;
+const stack = live ? null : await localStack();
+const url = process.env.E2E_BASE_URL || stack.url, password = process.env.E2E_ADMIN_KEY || stack.password;
+const errors = stack?.errors || [];
+const browser = await chromium.launch({ ...launchOptions, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
+const clients = [];
 try {
-  const host = await page('host'); await host.goto(url);
-  await host.screenshot({ path: 'test-results/lobby.png', fullPage: true });
-  await host.locator('#username').fill(process.env.E2E_USERNAME || 'admin');
-  await host.locator('#admin-key').fill(adminKey);
-  await host.locator('#devices-button').click();
-  await host.locator('#camera2').selectOption('test-camera-2');
-  await host.locator('#join-button').click();
-  await host.waitForFunction(() => document.querySelector('#signal-status').textContent.includes('在线'));
-  assert.equal(await host.locator('.video-card video').count(), 2);
-  // Retrieve the generated guest invitation through the user-facing copy action.
-  await host.evaluate(() => { navigator.clipboard.writeText = async value => { window.copiedInvite = value; }; });
-  await host.locator('#invite').click();
-  const invite = await host.evaluate(() => window.copiedInvite);
-  assert.ok(invite.includes('#room='));
-  const guests = [];
-  for (let i = 1; i <= 2; i++) {
-    const guest = await page(`guest${i}`); guests.push(guest);
-    await guest.goto(invite); await guest.locator('#name').fill(`Guest ${i}`);
-    await guest.locator('#devices-button').click(); await guest.locator('#join-button').click();
+  await mkdir('test-results', { recursive: true });
+  if (stack) assert.equal(await stack.host.evaluate(() => window.testTracks.length), 0);
+  for (let i = 0; i < 2; i++) { const p = await remotePage(browser, errors); clients.push(p); await connectRemote(p, url, password, process.env.E2E_USERNAME || 'admin'); }
+  for (const p of clients) {
+    await p.waitForFunction(() => window.testPeers.filter(pc => pc.connectionState === 'connected').length === 2, null, { timeout: 45000 });
+    await p.waitForFunction(live => document.querySelectorAll('#host-videos video').length === 2 && [...document.querySelectorAll('#host-videos video')].every(v => v.readyState >= 2 && (live ? [720,1080].includes(v.videoHeight) : v.videoHeight === 1080) && v.videoWidth === v.videoHeight * 16 / 9), live, { timeout: 45000 });
+    await p.waitForFunction(() => document.querySelectorAll('#remote-videos video').length === 2 && document.querySelectorAll('#remote-audio audio').length === 2);
+    await p.waitForFunction(async () => { const stats = await Promise.all(window.testPeers.filter(pc => pc.connectionState === 'connected').map(pc => pc.getStats())); return stats.every(s => [...s.values()].some(r => r.type === 'inbound-rtp' && r.kind === 'audio' && r.bytesReceived > 0)); });
   }
-  for (const p of [host, ...guests]) {
-    await p.waitForFunction(() => window.testPeers.filter(pc => pc.connectionState === 'connected').length === 2, { timeout: 25000 });
-    await p.waitForFunction(() => [...document.querySelectorAll('.video-card video')].length === 4 && [...document.querySelectorAll('.video-card video')].every(v => v.readyState >= 2 && v.videoWidth > 0), { timeout: 25000 });
-    await p.waitForFunction(() => document.querySelectorAll('#video-grid audio').length === 2);
-    await p.waitForFunction(async () => {
-      const stats = await Promise.all(window.testPeers.filter(pc => pc.connectionState === 'connected').map(pc => pc.getStats()));
-      return stats.every(s => [...s.values()].some(r => r.type === 'inbound-rtp' && r.kind === 'audio' && r.bytesReceived > 0));
-    });
-    assert.equal(await p.locator('#people-count').textContent(), '3 / 3');
+  if (stack) {
+    await stack.host.waitForFunction(() => document.querySelectorAll('#remote-media video').length === 2 && [...document.querySelectorAll('#remote-media video')].every(v => v.readyState >= 2));
+    assert.deepEqual(await stack.host.evaluate(() => window.hostDiagnostics().capture.sources.map(s => [s.settings.width, s.settings.height])), [[3840, 2160], [3840, 2160]]);
+    assert.equal(await stack.host.evaluate(() => { const d = window.hostDiagnostics(); return [...d.peers.values()].every(p => p.pc.getSenders().filter(s => s.track?.kind === 'video').every(s => !d.capture.sources.some(c => c.stream.getVideoTracks().includes(s.track)))); }), true);
   }
-  await host.waitForFunction(() => document.querySelector('#participants').textContent.includes('P2P 直连'));
-  await host.screenshot({ path: 'test-results/meeting.png', fullPage: true });
-  await host.locator('#mute').click();
-  assert.equal(await host.evaluate(() => window.testTracks.filter(t => t.readyState === 'live' && t.kind === 'audio').every(t => !t.enabled)), true);
-  await host.locator('#mute').click();
-  await host.locator('#camera-toggle').click();
-  assert.equal(await host.evaluate(() => window.testTracks.filter(t => t.readyState === 'live' && t.kind === 'video').every(t => !t.enabled)), true);
-  await host.locator('#camera-toggle').click();
-  const fourth = await page('fourth'); await fourth.goto(invite); await fourth.locator('#mode').selectOption('listen'); await fourth.locator('#join-button').click();
-  await fourth.waitForFunction(() => document.querySelector('#message').textContent.includes('会议已满'));
-  assert.equal(await fourth.locator('#lobby').isVisible(), true);
-  // Signal reconnect must restore all peer connections and keep dual-camera media.
-  await guests[0].evaluate(() => window.testSockets.at(-1).close());
-  await guests[0].waitForFunction(() => window.testSockets.length >= 2);
-  await guests[0].waitForFunction(() => window.testPeers.filter(pc => pc.connectionState === 'connected').length === 2);
-  await guests[0].waitForFunction(() => document.querySelectorAll('.video-card video').length === 4 && [...document.querySelectorAll('.video-card video')].every(v => v.readyState >= 2));
-  await guests[1].locator('#leave').click();
-  await host.waitForFunction(() => document.querySelector('#people-count').textContent === '2 / 3');
-  assert.equal(await guests[1].evaluate(() => window.testTracks.every(t => t.readyState === 'ended')), true);
-  // Rejoin as receive-only and ensure two host cameras still arrive.
-  await guests[1].locator('#mode').selectOption('listen'); await guests[1].locator('#join-button').click();
-  await guests[1].waitForFunction(() => document.querySelectorAll('.video-card video').length === 3 && [...document.querySelectorAll('.video-card video')].every(v => v.readyState >= 2));
-  await host.setViewportSize({ width: 390, height: 844 });
-  assert.equal(await host.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await host.screenshot({ path: 'test-results/mobile.png', fullPage: true });
-  host.on('dialog', dialog => dialog.accept()); await host.locator('#end-room').click();
-  for (const p of [host, ...guests]) { await p.waitForFunction(() => !document.querySelector('#lobby').hidden); assert.equal(await p.evaluate(() => window.testTracks.every(t => t.readyState === 'ended')), true); }
+  await setView(clients[0], 0, 2, 0.25); await setView(clients[1], 0, 2, 0.75);
+  await setView(clients[0], 1, 3, 0.7);
+  if (stack) {
+    const sample = async (p, side) => p.waitForFunction(side => { const v = document.querySelector('#host-videos [data-camera="0"] video'), c = document.createElement('canvas'); c.width = c.height = 1; const ctx = c.getContext('2d'); ctx.drawImage(v, v.videoWidth / 2, v.videoHeight / 2, 1, 1, 0, 0, 1, 1); const [r,g,b] = ctx.getImageData(0,0,1,1).data; return side === 'left' ? r > 170 && b < 90 : b > 170 && r < 90; }, side);
+    await sample(clients[0], 'left'); await sample(clients[1], 'right');
+    await stack.host.waitForFunction(() => { const views = [...window.hostDiagnostics().peers.values()].map(p => p.media.find(m => m.camera === 0).view); return views.some(v => v.x < 0.3) && views.some(v => v.x > 0.7); });
+  } else {
+    const status = await (await fetch(process.env.E2E_HOST_STATUS_URL || 'http://127.0.0.1:3034/api/status')).json();
+    assert.equal(status.capturing, true); assert.equal(status.peers.length, 2); assert.ok(status.peers.some(p => p.views[0].x < 0.3)); assert.ok(status.peers.some(p => p.views[0].x > 0.7));
+    console.log('Physical capture resolutions:', status.cameras.map(c => `${c.label}: ${c.width}x${c.height}`).join('; '));
+  }
+  const extra = await remotePage(browser, errors); await extra.goto(url); await extra.locator('#admin-key').fill(password); await extra.locator('#mode').selectOption('listen'); await extra.locator('#join-button').click(); await extra.waitForFunction(() => document.querySelector('#message').textContent.includes('两位远端'));
+  await clients[0].locator('#mute').click(); assert.equal(await clients[0].evaluate(() => window.testTracks.filter(t => t.readyState === 'live' && t.kind === 'audio').every(t => !t.enabled)), true); await clients[0].locator('#mute').click();
+  await clients[0].locator('#camera-toggle').click(); assert.equal(await clients[0].evaluate(() => window.testTracks.filter(t => t.readyState === 'live' && t.kind === 'video').every(t => !t.enabled)), true); await clients[0].locator('#camera-toggle').click();
+  if (!live) {
+    await clients[0].screenshot({ path: 'test-results/remote-crops.png', fullPage: true });
+    await stack.host.screenshot({ path: 'test-results/host-console.png', fullPage: true });
+  }
+  await clients[0].evaluate(() => window.testSockets.at(-1).close());
+  await clients[0].waitForFunction(() => window.testSockets.length >= 2 && window.testPeers.filter(pc => pc.connectionState === 'connected').length === 2);
+  await clients[0].waitForFunction(() => document.querySelectorAll('#host-videos video').length === 2 && [...document.querySelectorAll('#host-videos video')].every(v => v.readyState >= 2));
+  if (stack) {
+    // Pause must close local capture and connections; resuming recreates host links.
+    await stack.host.locator('#pause').click();
+    await stack.host.waitForFunction(() => window.hostDiagnostics().capture === null);
+    await clients[0].waitForFunction(() => document.querySelector('#capture-info').textContent.includes('离线'));
+    await stack.host.locator('#pause').click();
+    for (const p of clients) await p.waitForFunction(() => window.testPeers.filter(pc => pc.connectionState === 'connected').length === 2 && document.querySelectorAll('#host-videos video').length === 2 && [...document.querySelectorAll('#host-videos video')].every(v => v.readyState >= 2), null, { timeout: 45000 });
+    await setView(clients[0], 0, 2, 0.25);
+  }
+  await clients[0].setViewportSize({ width: 390, height: 844 }); assert.equal(await clients[0].evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  if (!live) await clients[0].screenshot({ path: 'test-results/remote-mobile.png', fullPage: true });
+  await clients[0].locator('.crop-controls[data-camera="0"] button').click(); await clients[0].waitForFunction(() => document.querySelector('.crop-controls[data-camera="0"] .crop-status').textContent.includes('1.0×'));
+  for (const p of clients) { await p.locator('#leave').click(); assert.equal(await p.evaluate(() => window.testTracks.every(t => t.readyState === 'ended')), true); }
+  if (stack) await stack.host.waitForFunction(() => window.hostDiagnostics().capture === null && window.testTracks.every(t => t.readyState === 'ended'));
+  else {
+    for (let i=0;i<20;i++) { const s=await (await fetch(process.env.E2E_HOST_STATUS_URL || 'http://127.0.0.1:3034/api/status')).json(); if (!s.capturing) break; await new Promise(r=>setTimeout(r,500)); }
+    assert.equal((await (await fetch(process.env.E2E_HOST_STATUS_URL || 'http://127.0.0.1:3034/api/status')).json()).capturing, false);
+  }
   assert.deepEqual(errors, []);
-  console.log('PASS: real WebRTC dual-camera/video/audio across 3 browser contexts; room limit; mute; reconnect; receive-only rejoin; room end; mobile layout.');
+  console.log('PASS: persistent host wake/idle; 2 remote camera+mic connections; per-viewer/per-camera source-side crops; 1080p received; source tracks never sent; capacity; reconnect; mute; reset; mobile layout.');
 } catch (error) {
-  for (const context of browser.contexts()) for (const p of context.pages()) {
-    console.error(await p.evaluate(() => ({ message: document.querySelector('#message')?.textContent, participants: document.querySelector('#participants')?.textContent, events: window.testEvents, pcs: window.testPeers?.map(pc => ({ state: pc.connectionState, signaling: pc.signalingState, ice: pc.iceConnectionState, senders: pc.getSenders().map(s => s.track?.readyState) })) })));
-  }
+  for (const [i,p] of clients.entries()) console.error('remote',i,await p.evaluate(() => ({ message:document.querySelector('#message').textContent, host:document.querySelector('#capture-info').textContent, pcs:window.testPeers.map(pc=>({state:pc.connectionState,ice:pc.iceConnectionState,signaling:pc.signalingState})) })));
+  if (stack) console.error('host',await stack.host.evaluate(() => ({error:document.querySelector('#error').textContent, state:document.querySelector('#capture-status').textContent, peers:window.testPeers.map(pc=>({state:pc.connectionState,ice:pc.iceConnectionState}))})));
   throw error;
-} finally { await browser.close(); if (server) await server.shutdown(); }
+} finally { await browser.close(); if (stack) await stack.close(); }

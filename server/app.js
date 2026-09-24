@@ -1,13 +1,12 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { randomBytes, randomUUID, timingSafeEqual, createHmac } from 'node:crypto';
-import { WebSocketServer, WebSocket } from 'ws';
+import { randomBytes, createHmac } from 'node:crypto';
+import { createHub } from './hub.js';
 import { createUserStore } from './users.js';
 
 const token = () => randomBytes(24).toString('base64url');
-const equal = (a, b) => typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const split = value => (value || '').split(',').map(v => v.trim()).filter(Boolean);
-const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/accounts.js', ['accounts.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']]]);
+const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/remote.js', ['remote.js', 'text/javascript']], ['/accounts.js', ['accounts.js', 'text/javascript']], ['/rtc.js', ['rtc.js', 'text/javascript']], ['/crop-controls.js', ['crop-controls.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']]]);
 
 export function createMeetingServer(options = {}) {
   const env = { ...process.env, ...options };
@@ -19,9 +18,7 @@ export function createMeetingServer(options = {}) {
   const allowedOrigins = split(env.ALLOWED_ORIGINS);
   const ttl = Number(env.ROOM_TTL_HOURS || 8) * 3600_000;
   if (!Number.isFinite(ttl) || ttl <= 0 || ttl > 86400_000) throw new Error('ROOM_TTL_HOURS must be between 0 and 24.');
-  const rooms = new Map();
   const limits = new Map();
-  const connections = new Map();
   const originAllowed = (origin, req) => allowedOrigins.length
     ? allowedOrigins.includes(origin)
     : /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin || '') && origin === `http://${req.headers.host}`;
@@ -51,7 +48,7 @@ export function createMeetingServer(options = {}) {
     const session = sessions.get(key);
     if (!session || session.expiresAt <= Date.now()) { sessions.delete(key); return null; }
     const user = users.get(session.userId);
-    return user?.enabled ? { key, user } : null;
+    return user?.enabled ? { key, user, expiresAt: session.expiresAt } : null;
   }
   function cookie(req, value, maxAge) {
     const secure = req.socket.encrypted || (env.TRUST_PROXY === 'true' && req.headers['x-forwarded-proto'] === 'https');
@@ -68,13 +65,9 @@ export function createMeetingServer(options = {}) {
     try { const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')); if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(); return parsed; }
     catch { throw Object.assign(new Error('无效的请求内容'), { status: 400 }); }
   }
-  function endRoom(room) {
-    rooms.delete(room.id);
-    for (const p of room.peers.values()) { send(p.ws, { type: 'room-ended' }); p.ws.close(1000, 'Room ended'); }
-  }
   function revokeUser(id) {
     for (const [key, session] of sessions) if (session.userId === id) sessions.delete(key);
-    for (const room of rooms.values()) if (room.ownerId === id) endRoom(room);
+    hub.revokeUser(id);
   }
   const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -97,14 +90,14 @@ export function createMeetingServer(options = {}) {
         if (!user) return json(res, 401, { error: '账号或口令不正确，或账号已停用' });
         limits.delete(`login-account:${name}`);
         if (sessions.size >= 1000) return json(res, 503, { error: '登录人数已达上限，请稍后重试' });
-        const old = sessionFor(req); if (old) sessions.delete(old.key);
+        const old = sessionFor(req); if (old) { sessions.delete(old.key); hub.revokeSession(old.key); }
         const sessionToken = token();
         sessions.set(sessionToken, { userId: user.id, expiresAt: Date.now() + sessionTTL });
         res.setHeader('Set-Cookie', cookie(req, sessionToken, sessionTTL / 1000));
         return json(res, 200, { user });
       }
       if (req.method === 'POST' && path === '/api/logout') {
-        const session = sessionFor(req); if (session) sessions.delete(session.key);
+        const session = sessionFor(req); if (session) { sessions.delete(session.key); hub.revokeSession(session.key); }
         res.setHeader('Set-Cookie', cookie(req, '', 0));
         return json(res, 200, { ok: true });
       }
@@ -127,15 +120,16 @@ export function createMeetingServer(options = {}) {
         if (req.method === 'DELETE') { users.remove(id); revokeUser(id); return json(res, 200, { ok: true }); }
         return json(res, 404, { error: 'Not found' });
       }
-      if (req.method === 'POST' && path === '/api/rooms') {
-        if (!rate(`create:${address(req)}`, 20)) return json(res, 429, { error: '创建过于频繁，请稍后重试' });
+      if (path === '/api/host-status' || path === '/api/connect') {
         const session = sessionFor(req);
-        if (!session) return json(res, 401, { error: '请先登录主持账号' });
-        if (rooms.size >= 100) return json(res, 503, { error: '会议室已达上限' });
-        const room = { id: token(), ownerId: session.user.id, hostToken: token(), guestToken: token(), expiresAt: Date.now() + ttl, peers: new Map() };
-        rooms.set(room.id, room);
-        return json(res, 201, { room: room.id, hostToken: room.hostToken, guestToken: room.guestToken, expiresAt: room.expiresAt });
+        if (!session) return json(res, 401, { error: '请先登录远端账号' });
+        if (req.method === 'GET' && path === '/api/host-status') return json(res, 200, hub.status());
+        if (req.method === 'POST' && path === '/api/connect') {
+          if (!rate('reserve:' + session.user.id, 20)) return json(res, 429, { error: '连接过于频繁，请稍后重试' });
+          return json(res, 201, hub.reserve(session, req));
+        }
       }
+      if (path === '/api/rooms') return json(res, 410, { error: '请刷新页面，使用账号连接现场主机' });
       if (req.method === 'GET' && assets.has(path)) {
         const [filename, type] = assets.get(path);
         const data = await readFile(new URL(`../public/${filename}`, import.meta.url));
@@ -147,91 +141,12 @@ export function createMeetingServer(options = {}) {
   });
   server.headersTimeout = 15_000;
   server.requestTimeout = 15_000;
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
-  server.on('upgrade', (req, socket, head) => {
-    if (req.url !== '/ws' || !originAllowed(req.headers.origin, req)) return socket.destroy();
-    const ip = address(req);
-    if (!rate(`connect:${ip}`, 60) || (connections.get(ip) || 0) >= 12) return socket.destroy();
-    wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
-  });
-  const send = (ws, msg) => {
-    if (ws.readyState !== WebSocket.OPEN) return;
-    if (ws.bufferedAmount > 256 * 1024) { ws.close(1008, 'Slow consumer'); return; }
-    ws.send(JSON.stringify(msg));
-  };
-  const describe = peer => ({ id: peer.id, role: peer.role, name: peer.name });
-  wss.on('connection', (ws, req) => {
-    const ip = address(req);
-    connections.set(ip, (connections.get(ip) || 0) + 1);
-    ws.alive = true;
-    let room, peer;
-    let burst = { start: Date.now(), count: 0 };
-    const joinTimeout = setTimeout(() => ws.close(1008, 'Join timeout'), 10_000);
-    const fail = (code, message) => { send(ws, { type: 'error', code, message }); ws.close(1008, code); };
-    ws.on('pong', () => { ws.alive = true; });
-    ws.on('error', () => {});
-    ws.on('message', (raw, isBinary) => {
-      if (Date.now() - burst.start > 1000) burst = { start: Date.now(), count: 0 };
-      if (++burst.count > 120) return fail('RATE_LIMIT', '信令过于频繁');
-      try {
-        if (isBinary) return fail('INVALID', '仅支持 JSON 信令');
-        const msg = JSON.parse(raw.toString());
-        if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return fail('INVALID', '无效消息');
-        if (!peer) {
-          if (msg.type !== 'join') return fail('AUTH', '请先加入会议');
-          room = rooms.get(msg.room);
-          if (!room || room.expiresAt < Date.now()) return fail('EXPIRED', '会议不存在或已过期，请联系主持人');
-          const role = equal(msg.token, room.hostToken) ? 'host' : equal(msg.token, room.guestToken) ? 'guest' : null;
-          if (!role) { room = null; return fail('AUTH', '邀请链接无效'); }
-          if (room.peers.size >= 3 || [...room.peers.values()].filter(p => p.role === role).length >= (role === 'host' ? 1 : 2)) return fail('FULL', '会议已满（1 位主持人、2 位访客）');
-          peer = { id: randomUUID(), ws, role, name: String(msg.name || (role === 'host' ? '现场主持人' : '远端访客')).trim().slice(0, 40) };
-          clearTimeout(joinTimeout);
-          send(ws, { type: 'joined', self: describe(peer), peers: [...room.peers.values()].map(describe), iceServers: iceServers(), expiresAt: room.expiresAt, ...(role === 'host' ? { guestToken: room.guestToken } : {}) });
-          for (const p of room.peers.values()) send(p.ws, { type: 'peer-joined', peer: describe(peer) });
-          room.peers.set(peer.id, peer);
-          return;
-        }
-        if (msg.type === 'signal') {
-          const target = room.peers.get(msg.to);
-          if (!target || target === peer) return;
-          const data = msg.data;
-          if (!data || typeof data !== 'object') return;
-          // An explicit signaling allowlist prevents this server becoming a generic media relay.
-          if (data.description) {
-            const d = data.description;
-            if (!['offer', 'answer'].includes(d.type) || typeof d.sdp !== 'string' || d.sdp.length > 48_000) return fail('INVALID', '无效 SDP');
-            const streams = Array.isArray(data.streams) ? data.streams.slice(0, 4).map(s => ({ id: String(s.id || '').slice(0, 100), label: String(s.label || '').slice(0, 40), kind: s.kind === 'audio' ? 'audio' : 'video' })) : [];
-            send(target.ws, { type: 'signal', from: peer.id, data: { description: { type: d.type, sdp: d.sdp }, streams } });
-          } else if (data.candidate && typeof data.candidate.candidate === 'string' && data.candidate.candidate.length <= 2048) {
-            const c = data.candidate;
-            if (c.sdpMid !== null && typeof c.sdpMid !== 'string') return;
-            if (c.sdpMLineIndex !== null && (!Number.isInteger(c.sdpMLineIndex) || c.sdpMLineIndex < 0 || c.sdpMLineIndex > 20)) return;
-            send(target.ws, { type: 'signal', from: peer.id, data: { candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex, usernameFragment: typeof c.usernameFragment === 'string' ? c.usernameFragment.slice(0, 256) : undefined } } });
-          }
-        } else if (msg.type === 'end-room' && peer.role === 'host') {
-          endRoom(room);
-        }
-      } catch { fail('INVALID', '无法解析消息'); }
-    });
-    ws.on('close', () => {
-      clearTimeout(joinTimeout);
-      const count = (connections.get(ip) || 1) - 1;
-      if (count) connections.set(ip, count); else connections.delete(ip);
-      if (room && peer && room.peers.delete(peer.id)) for (const p of room.peers.values()) send(p.ws, { type: 'peer-left', id: peer.id });
-    });
-  });
+  const hub = createHub(server, { hostKey: env.HOST_AGENT_KEY, sessionFor, originAllowed, rate, address, iceServers, reconnectMs: Number(env.RECONNECT_GRACE_MS || 30000) });
   const cleanup = setInterval(() => {
-    for (const ws of wss.clients) { if (!ws.alive) ws.terminate(); else { ws.alive = false; ws.ping(); } }
-    for (const room of rooms.values()) if (room.expiresAt < Date.now()) endRoom(room);
-    for (const [key, session] of sessions) if (session.expiresAt < Date.now()) sessions.delete(key);
+    for (const [key, session] of sessions) if (session.expiresAt < Date.now()) { sessions.delete(key); hub.revokeSession(key); }
     for (const [key, entry] of limits) if (entry.until < Date.now()) limits.delete(key);
-  }, 30_000);
+  }, 30000);
   cleanup.unref();
-  server.shutdown = () => new Promise(resolve => {
-    clearInterval(cleanup);
-    for (const ws of wss.clients) ws.terminate();
-    wss.close();
-    server.close(resolve);
-  });
+  server.shutdown = () => new Promise(resolve => { clearInterval(cleanup); hub.shutdown(); server.close(resolve); });
   return server;
 }

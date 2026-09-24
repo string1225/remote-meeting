@@ -37,6 +37,11 @@ fi
 # the first admin from ADMIN_KEY once, without changing existing credentials.
 grep -q '^USERS_FILE=' /etc/remote-meeting.env || printf '\nUSERS_FILE=/var/lib/remote-meeting/users.json\n' >> /etc/remote-meeting.env
 grep -q '^COOKIE_PATH=' /etc/remote-meeting.env || printf 'COOKIE_PATH=/meeting/\n' >> /etc/remote-meeting.env
+if ! grep -q '^HOST_AGENT_KEY=' /etc/remote-meeting.env; then
+    host_agent_key="$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')"
+    printf 'HOST_AGENT_KEY=%s\n' "$host_agent_key" >> /etc/remote-meeting.env
+    unset host_agent_key
+fi
 chmod 600 /etc/remote-meeting.env
 mkdir -p /etc/nginx/snippets /opt/remote-meeting/backups
 stamp="$(date +%Y%m%d%H%M%S)"
