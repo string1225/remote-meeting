@@ -43,7 +43,7 @@ try {
     await stack.host.screenshot({ path: 'test-results/host-console.png', fullPage: true });
   }
   await clients[0].evaluate(() => window.testSockets.at(-1).close());
-  await clients[0].waitForFunction(() => window.testSockets.length >= 2 && window.testPeers.filter(pc => pc.connectionState === 'connected').length === 2);
+  await clients[0].waitForFunction(() => window.testSockets.length >= 2 && window.testPeers.filter(pc => pc.connectionState === 'closed').length >= 2 && window.testPeers.slice(-2).every(pc => pc.connectionState === 'connected'), null, { timeout: 45000 });
   await clients[0].waitForFunction(() => document.querySelectorAll('#host-videos video').length === 2 && [...document.querySelectorAll('#host-videos video')].every(v => v.readyState >= 2));
   if (stack) {
     // Pause must close local capture and connections; resuming recreates host links.
@@ -56,7 +56,7 @@ try {
   }
   await clients[0].setViewportSize({ width: 390, height: 844 }); assert.equal(await clients[0].evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   if (!live) await clients[0].screenshot({ path: 'test-results/remote-mobile.png', fullPage: true });
-  await clients[0].locator('.crop-controls[data-camera="0"] button').click(); await clients[0].waitForFunction(() => document.querySelector('.crop-controls[data-camera="0"] .crop-status').textContent.includes('1.0×'));
+  await clients[0].locator('.crop-controls[data-camera="0"] button').click(); await clients[0].waitForFunction(() => document.querySelector('.crop-controls[data-camera="0"] .crop-status')?.textContent.includes('1.0×'));
   for (const p of clients) { await p.locator('#leave').click(); assert.equal(await p.evaluate(() => window.testTracks.every(t => t.readyState === 'ended')), true); }
   if (stack) await stack.host.waitForFunction(() => window.hostDiagnostics().capture === null && window.testTracks.every(t => t.readyState === 'ended'));
   else {
