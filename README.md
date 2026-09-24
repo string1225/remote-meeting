@@ -81,6 +81,10 @@ npm run test:e2e
 
 也可通过 `BROWSER_PATH` 使用已有 Chrome / Edge。端到端测试使用合成的两路摄像头和测试麦克风，在三个隔离浏览器上下文中验证真正的 WebRTC 视频帧 / 音频字节、人数限制、静音、重连、旁听、结束会议与手机布局。截图位于忽略的 `test-results/`。合成设备测试不替代实际两台摄像头和不同外网的验收。
 
+设置 `E2E_BASE_URL` 和 `E2E_ADMIN_KEY` 可运行部署后的同一套端到端测试（会创建并结束一个独立测试会议）。`node test/hardware.mjs` 是主动启用真实设备的本机检查：同时开启两个非红外摄像头和麦克风，确认预览后释放设备，媒体不发送到其他电脑。
+
+本机已验证 PC Camera 与 Surface Camera Front 同时输出 1280×720，默认 PC Camera 麦克风可用。不要选择 Windows Hello 的 Surface IR 红外摄像头。真实外网参会者的 NAT 连通性仍需在各自网络验收。
+
 ## SSH / Codex
 
 本机 SSH 别名：`aliyun-remote-meeting`，身份文件位于用户的 `~/.ssh/remote_meeting_aliyun`，不在本仓库。`ssh aliyun-remote-meeting` 可连接；自动化命令用 `ssh -T aliyun-remote-meeting '<command>'` 避开服务器默认交互式 Copilot Shell。
