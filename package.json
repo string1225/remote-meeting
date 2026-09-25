@@ -13,6 +13,7 @@
     "test": "node --test test/*.test.js",
     "test:e2e": "node test/browser.mjs",
     "test:accounts": "node test/accounts-browser.mjs",
+    "test:host-accounts": "node test/host-accounts-browser.mjs",
     "check": "node test/check.mjs",
     "host": "node host/index.js"
   },

@@ -81,6 +81,12 @@ export function createUserStore({ file = '.local/users.json', bootstrapPassword,
       const old = users.find(u => u.id === id);
       if (!old) throw Object.assign(new Error('账号不存在'), { status: 404 });
       const user = { ...old };
+      if ('username' in input) {
+        const username = normalize(input.username);
+        if (!/^[a-z0-9][a-z0-9_.-]{1,31}$/.test(username)) throw invalid('账号需为 2–32 位字母、数字、点、下划线或短横线');
+        if (users.some(u => u.id !== id && u.username === username)) throw invalid('此账号已存在');
+        user.username = username;
+      }
       if ('password' in input) Object.assign(user, hashPassword(input.password));
       if ('enabled' in input) { if (typeof input.enabled !== 'boolean') throw invalid('无效的账号状态'); user.enabled = input.enabled; }
       if ('role' in input) { if (!['admin', 'host'].includes(input.role)) throw invalid('无效的账号类型'); user.role = input.role; }

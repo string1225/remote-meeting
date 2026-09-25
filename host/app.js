@@ -1,6 +1,7 @@
 import { MeetingRTC } from '/rtc.js';
 import { captureHost } from '/capture.js';
 import { createCrop } from '/crop.js';
+import '/host-accounts.js';
 
 const $ = id => document.getElementById(id);
 let bridge, config = {}, capture, capturing, idleTimer, paused = false, chain = Promise.resolve();

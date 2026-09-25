@@ -5,7 +5,8 @@
 <div class="setup panel"><div class="section-top"><span class="step">01</span><h2>连接现场主机</h2></div><form id="setup-form"><input id="name" type="hidden" value="远端用户">
           <div id="admin-field" class="auth-panel">
             <div id="login-fields">
-              <div class="form-pair"><label>远端账号<input id="username" value="admin" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false"></label><label>口令<input id="admin-key" type="password" autocomplete="current-password" maxlength="128" placeholder="输入你的口令"></label></div>
+              <div class="form-pair"><label>远端账号<input id="username" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="主机分配的账号"></label><label>登录密钥<input id="admin-key" type="password" autocomplete="current-password" maxlength="128" placeholder="主机设置的密钥"></label></div>
+              <p class="hint full">请使用现场主机为你配置的账号和密钥登录，姓名由主机统一设置。</p>
               <button id="login" type="button" class="secondary full">登录账号</button>
             </div>
             <div id="signed-in" hidden><strong id="account-name"></strong><div class="account-actions"><button id="manage-users" type="button" class="secondary" hidden>账号管理</button><button id="logout" type="button" class="text-button">退出登录</button></div></div>

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { randomBytes, createHmac } from 'node:crypto';
 import { createHub } from './hub.js';
 import { createUserStore } from './users.js';
+import { authenticateAgent } from './agent-auth.js';
 
 const token = () => randomBytes(24).toString('base64url');
 const split = value => (value || '').split(',').map(v => v.trim()).filter(Boolean);
@@ -78,6 +79,27 @@ export function createMeetingServer(options = {}) {
     try {
       const path = new URL(req.url, 'http://localhost').pathname;
       if (req.method === 'GET' && path === '/api/health') return json(res, 200, { status: 'ok', mode: 'signaling-only' });
+      // Machine-authenticated management is scoped to remote accounts. The key
+      // stays in the local Node service; browser sessions cannot use this route.
+      if (path === '/api/agent/users' || path.startsWith('/api/agent/users/')) {
+        if (req.headers.origin || !authenticateAgent(req.headers.authorization, env.HOST_AGENT_KEY)) return json(res, 401, { error: '主机认证失败，请检查本机机器凭据' });
+        const route = /^\/api\/agent\/users(?:\/([a-f0-9-]{36}))?$/.exec(path);
+        if (!route) return json(res, 404, { error: '账号不存在' });
+        const id = route[1];
+        if (req.method === 'GET' && !id) return json(res, 200, { users: users.list().filter(u => u.role === 'host') });
+        if (!(req.method === 'POST' && !id || ['PATCH', 'DELETE'].includes(req.method) && id)) return json(res, 405, { error: '不支持的操作' });
+        if (!rate('agent-user-edit', 30)) return json(res, 429, { error: '操作过于频繁，请稍后重试' });
+        const input = req.method === 'DELETE' ? {} : await body(req);
+        if ('role' in input || Object.keys(input).some(key => !['username', 'displayName', 'password', 'enabled'].includes(key))) return json(res, 400, { error: '只能配置远端人员的姓名、账号、密钥和启用状态' });
+        if (req.method === 'POST') return json(res, 201, { user: users.create({ ...input, role: 'host' }) });
+        if (users.get(id)?.role !== 'host') return json(res, 404, { error: '远端账号不存在' });
+        if (req.method === 'PATCH') {
+          const user = users.update(id, input);
+          if ('password' in input || 'username' in input || !user.enabled) revokeUser(id);
+          return json(res, 200, { user });
+        }
+        users.remove(id); revokeUser(id); return json(res, 200, { ok: true });
+      }
       if (['POST', 'PATCH', 'DELETE'].includes(req.method) && !originAllowed(req.headers.origin, req)) return json(res, 403, { error: '不允许的访问来源' });
       if (req.method === 'GET' && path === '/api/session') return json(res, 200, { user: sessionFor(req)?.user || null });
       if (req.method === 'POST' && path === '/api/login') {
@@ -114,7 +136,7 @@ export function createMeetingServer(options = {}) {
         const id = path.slice('/api/users/'.length);
         if (req.method === 'PATCH') {
           const user = users.update(id, input);
-          if ('password' in input || !user.enabled || 'role' in input) revokeUser(id);
+          if ('password' in input || 'username' in input || !user.enabled || 'role' in input) revokeUser(id);
           return json(res, 200, { user });
         }
         if (req.method === 'DELETE') { users.remove(id); revokeUser(id); return json(res, 200, { ok: true }); }

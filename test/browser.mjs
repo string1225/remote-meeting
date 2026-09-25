@@ -35,7 +35,7 @@ try {
     assert.equal(status.capturing, true); assert.equal(status.peers.length, 2); assert.ok(status.peers.some(p => p.views[0].x < 0.3)); assert.ok(status.peers.some(p => p.views[0].x > 0.7));
     console.log('Physical capture resolutions:', status.cameras.map(c => `${c.label}: ${c.width}x${c.height}`).join('; '));
   }
-  const extra = await remotePage(browser, errors); await extra.goto(url); await extra.locator('#admin-key').fill(password); await extra.locator('#mode').selectOption('listen'); await extra.locator('#join-button').click(); await extra.waitForFunction(() => document.querySelector('#message').textContent.includes('两位远端'));
+  const extra = await remotePage(browser, errors); await extra.goto(url); await extra.locator('#username').fill(process.env.E2E_USERNAME || 'admin'); await extra.locator('#admin-key').fill(password); await extra.locator('#mode').selectOption('listen'); await extra.locator('#join-button').click(); await extra.waitForFunction(() => document.querySelector('#message').textContent.includes('两位远端'));
   await clients[0].locator('#mute').click(); assert.equal(await clients[0].evaluate(() => window.testTracks.filter(t => t.readyState === 'live' && t.kind === 'audio').every(t => !t.enabled)), true); await clients[0].locator('#mute').click();
   await clients[0].locator('#camera-toggle').click(); assert.equal(await clients[0].evaluate(() => window.testTracks.filter(t => t.readyState === 'live' && t.kind === 'video').every(t => !t.enabled)), true); await clients[0].locator('#camera-toggle').click();
   if (!live) {

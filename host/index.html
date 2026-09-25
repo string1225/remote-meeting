@@ -2,6 +2,25 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 现场主机</title><link rel="stylesheet" href="/style.css"><script type="module" src="/host-app.js"></script></head>
 <body><header><span class="brand">◈ 同屏 · 现场主机</span><span id="connection" class="badge">正在上线…</span></header><main>
 <div class="meeting-top"><div><span class="eyebrow">LOCAL HOST</span><h1>现场控制台 <span id="people-count">0 / 2 位远端</span></h1></div><button id="pause" class="danger">暂停远端接入</button></div>
+<section id="access-settings" class="panel access-settings" aria-labelledby="access-title">
+  <div class="dialog-top"><div><span class="eyebrow">REMOTE ACCESS</span><h2 id="access-title">外部接入人员配置</h2></div><button id="refresh-accounts" type="button" class="secondary">刷新列表</button></div>
+  <p class="hint access-help">在此配置每位人员的姓名、账号和登录密钥，保存后立即用于远端登录。可配置多位人员，最多两位同时接入。暂停接入时仍可调整配置。</p>
+  <p id="remote-login-address" class="hint" hidden>远端登录地址：<a id="remote-login-link" target="_blank" rel="noopener noreferrer"></a></p>
+  <p id="access-message" role="status" aria-live="polite" hidden></p>
+  <div class="access-grid">
+    <div><h3>已配置人员 <span id="access-count"></span></h3><div id="access-list" aria-busy="true"><p class="hint">正在读取人员配置…</p></div></div>
+    <form id="access-form" class="access-editor">
+      <fieldset id="access-fields"><legend id="access-form-title">新增人员</legend>
+        <div class="form-pair"><label>姓名<input id="remote-name" maxlength="40" autocomplete="off" required placeholder="如 张三"></label><label>登录账号<input id="remote-username" minlength="2" maxlength="32" pattern="[a-zA-Z0-9][a-zA-Z0-9_.\-]{1,31}" autocomplete="off" autocapitalize="none" spellcheck="false" required placeholder="如 zhangsan"></label></div>
+        <label><span id="remote-key-label">登录密钥</span><input id="remote-key" type="password" minlength="6" maxlength="128" autocomplete="new-password" required placeholder="6–128 个字符" aria-describedby="key-help"></label>
+        <div class="account-actions"><button id="generate-key" type="button" class="secondary">生成随机密钥</button><button id="show-key" type="button" class="secondary" aria-pressed="false">显示密钥</button></div>
+        <p id="key-help" class="hint">将账号和密钥单独告知对应人员。已保存的密钥不回显；编辑时留空表示保留原密钥。</p>
+        <p class="hint">修改账号或密钥、停用或删除人员后，该人员需要重新登录。姓名在下次连接时更新。</p>
+        <div class="account-actions access-save"><button id="save-account" type="submit" class="primary">保存并启用</button><button id="cancel-account" type="button" class="secondary" hidden>取消编辑</button></div>
+      </fieldset>
+    </form>
+  </div>
+</section>
 <div class="panel"><strong id="capture-status">待机 · 等待远端登录连接</strong><p class="hint">首位远端进入后自动开启两路摄像头和麦克风。原始画面留在本机，每位远端独立接收自己的两路 最高 1080p 裁剪画面。最后一位离开后自动释放设备。</p><p id="error" role="status" hidden></p><div id="sources" class="host-sources"></div></div>
 <h2>远端参与者</h2><div id="remote-media" class="video-grid"></div><div id="remote-audio"></div><div id="participants"></div><button id="play-audio" class="secondary">播放远端声音</button>
 </main><footer>此窗口由主机常驻程序管理；关闭窗口后会自动恢复。暂停接入请使用上方按钮。</footer></body></html>

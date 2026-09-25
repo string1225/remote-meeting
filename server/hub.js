@@ -1,7 +1,7 @@
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
+import { authenticateAgent } from './agent-auth.js';
 
-const same = (a, b) => typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const error = (status, message) => Object.assign(new Error(message), { status });
 const describe = p => ({ id: p.id, role: p.role, name: p.name });
 
@@ -32,7 +32,7 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
   }
   server.on('upgrade', (req, socket, head) => {
     const agent = req.url === '/agent';
-    if (agent ? !same(req.headers.authorization, `Bearer ${hostKey}`) : req.url !== '/ws' || !originAllowed(req.headers.origin, req) || !sessionFor(req)) {
+    if (agent ? !authenticateAgent(req.headers.authorization, hostKey) : req.url !== '/ws' || !originAllowed(req.headers.origin, req) || !sessionFor(req)) {
       socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return;
     }
     if (agent && host) { socket.end('HTTP/1.1 409 Conflict\r\nConnection: close\r\n\r\n'); return; }
