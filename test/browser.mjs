@@ -4,6 +4,7 @@ import { chromium } from 'playwright';
 import { localStack, launchOptions, remotePage, connectRemote, setView } from './browser-fixture.mjs';
 
 const live = !!process.env.E2E_BASE_URL;
+const screenshots = !live && process.env.E2E_SCREENSHOTS === 'true';
 const stack = live ? null : await localStack();
 const url = process.env.E2E_BASE_URL || stack.url, password = process.env.E2E_ADMIN_KEY || stack.password;
 const errors = stack?.errors || [];
@@ -38,7 +39,7 @@ try {
   const extra = await remotePage(browser, errors); await extra.goto(url); await extra.locator('#username').fill(process.env.E2E_USERNAME || 'admin'); await extra.locator('#admin-key').fill(password); await extra.locator('#mode').selectOption('listen'); await extra.locator('#join-button').click(); await extra.waitForFunction(() => document.querySelector('#message').textContent.includes('两位远端'));
   await clients[0].locator('#mute').click(); assert.equal(await clients[0].evaluate(() => window.testTracks.filter(t => t.readyState === 'live' && t.kind === 'audio').every(t => !t.enabled)), true); await clients[0].locator('#mute').click();
   await clients[0].locator('#camera-toggle').click(); assert.equal(await clients[0].evaluate(() => window.testTracks.filter(t => t.readyState === 'live' && t.kind === 'video').every(t => !t.enabled)), true); await clients[0].locator('#camera-toggle').click();
-  if (!live) {
+  if (screenshots) {
     await clients[0].screenshot({ path: 'test-results/remote-crops.png', fullPage: true });
     await stack.host.screenshot({ path: 'test-results/host-console.png', fullPage: true });
   }
@@ -55,7 +56,7 @@ try {
     await setView(clients[0], 0, 2, 0.25);
   }
   await clients[0].locator('#host-thumbnails [data-camera="0"]').click(); await clients[0].setViewportSize({ width: 390, height: 844 }); assert.equal(await clients[0].evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  if (!live) await clients[0].screenshot({ path: 'test-results/remote-mobile.png', fullPage: true });
+  if (screenshots) await clients[0].screenshot({ path: 'test-results/remote-mobile.png', fullPage: true });
   await clients[0].locator('.crop-controls[data-camera="0"] button').click(); await clients[0].waitForFunction(() => document.querySelector('.crop-controls[data-camera="0"] .crop-status')?.textContent.includes('1.0×'));
   for (const p of clients) { await p.locator('#leave').click(); assert.equal(await p.evaluate(() => window.testTracks.every(t => t.readyState === 'ended')), true); }
   if (stack) await stack.host.waitForFunction(() => window.hostDiagnostics().capture === null && window.testTracks.every(t => t.readyState === 'ended'));
