@@ -1,7 +1,8 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 现场主机</title><link rel="stylesheet" href="/style.css"><script type="module" src="/host-app.js"></script></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 现场主机</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/audio-meter.css"><script type="module" src="/host-app.js"></script></head>
 <body><header><span class="brand">◈ 同屏 · 现场主机</span><span id="connection" class="badge">正在上线…</span></header><main>
 <div class="meeting-top"><div><span class="eyebrow">LOCAL HOST</span><h1>现场控制台 <span id="people-count">0 / 2 位远端</span></h1></div><button id="pause" class="danger">暂停远端接入</button></div>
+<div id="host-audio"></div>
 <section id="access-settings" class="panel access-settings" aria-labelledby="access-title">
   <div class="dialog-top"><div><span class="eyebrow">REMOTE ACCESS</span><h2 id="access-title">外部接入人员配置</h2></div><button id="refresh-accounts" type="button" class="secondary">刷新列表</button></div>
   <p class="hint access-help">在此配置每位人员的姓名、账号和登录密钥，保存后立即用于远端登录。可配置多位人员，最多两位同时接入。暂停接入时仍可调整配置。</p>

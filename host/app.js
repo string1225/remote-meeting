@@ -2,11 +2,18 @@ import { MeetingRTC } from '/rtc.js';
 import { captureHost } from '/capture.js';
 import { createCrop } from '/crop.js';
 import '/host-accounts.js';
+import { createAudioMonitor } from '/audio-meter.js';
 
 const $ = id => document.getElementById(id);
 let bridge, config = {}, capture, capturing, idleTimer, paused = false, chain = Promise.resolve();
 const send = message => { if (bridge?.readyState === WebSocket.OPEN) bridge.send(JSON.stringify(message)); };
 function error(message) { $('error').hidden = !message; $('error').textContent = message; }
+const audioMonitor = createAudioMonitor({ container: $('host-audio'), onError: error, requestMicrophone: async () => {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const mic = config.microphone && devices.find(device => device.kind === 'audioinput' && device.label === config.microphone);
+  if (config.microphone && !mic) throw new Error('配置的麦克风未连接');
+  return navigator.mediaDevices.getUserMedia({ video: false, audio: { ...(mic ? { deviceId: { exact: mic.deviceId } } : {}), echoCancellation: true, noiseSuppression: true } });
+} });
 function state(value, message = '') {
   const cameras = capture?.sources.map(s => ({ label: s.label, width: s.settings.width, height: s.settings.height, frameRate: s.settings.frameRate })) || [];
   send({ type: 'host-state', state: value, cameras, message });
@@ -18,8 +25,10 @@ async function ensureCapture() {
   if (capture) return capture;
   if (capturing) return capturing;
   state('starting'); error('');
+  audioMonitor.stopPreview(); void audioMonitor.activate();
   capturing = captureHost(config).then(result => {
     capture = result;
+    audioMonitor.setMicrophone(capture.audio);
     $('sources').replaceChildren(...capture.sources.map((s, i) => {
       const item = document.createElement('div'), label = document.createElement('p');
       label.textContent = `摄像头 ${i + 1} · ${s.label} · ${s.settings.width} × ${s.settings.height} / ${Math.round(s.settings.frameRate)} fps`;
@@ -32,7 +41,7 @@ async function ensureCapture() {
   }).catch(e => { state('error', e.message); error(e.message); throw e; }).finally(() => { capturing = null; });
   return capturing;
 }
-function stopCapture() { clearTimeout(idleTimer); capture?.stop(); capture = null; $('sources').replaceChildren(); state('idle'); }
+function stopCapture() { clearTimeout(idleTimer); audioMonitor.setMicrophone(null); capture?.stop(); capture = null; $('sources').replaceChildren(); state('idle'); }
 function scheduleIdle() {
   clearTimeout(idleTimer);
   if (!rtc.peers.size) idleTimer = setTimeout(() => { if (!rtc.peers.size && !capturing) stopCapture(); }, config.idleMs ?? 3000);
@@ -56,10 +65,12 @@ const rtc = new MeetingRTC({
     const card = document.createElement('div'); card.dataset.owner = peer.info.id; card.dataset.stream = stream.id; card.className = 'video-card';
     const player = document.createElement(stream.getVideoTracks().length ? 'video' : 'audio'); player.autoplay = true; player.playsInline = true; player.srcObject = stream;
     const title = document.createElement('div'); title.className = 'caption'; title.textContent = peer.info.name;
+    if (stream.getVideoTracks().length) title.append(audioMonitor.peerMeter(peer.info.id));
+    else audioMonitor.addRemote(peer.info.id, stream, player);
     card.append(player, title); container.append(card); player.play().catch(() => error('请点击“播放远端声音”以启用声音。'));
   },
   onPeer: renderParticipants,
-  onRemove(peer) { for (const el of document.querySelectorAll('[data-owner]')) if (el.dataset.owner === peer.info.id) { const media = el.querySelector('video,audio'); if (media) media.srcObject = null; el.remove(); } renderParticipants(); scheduleIdle(); },
+  onRemove(peer) { audioMonitor.removeRemote(peer.info.id); for (const el of document.querySelectorAll('[data-owner]')) if (el.dataset.owner === peer.info.id) { const media = el.querySelector('video,audio'); if (media) media.srcObject = null; el.remove(); } renderParticipants(); scheduleIdle(); },
   onControl(peer, message) {
     if (message?.type !== 'viewport' || ![0, 1].includes(message.camera)) return;
     const crop = peer.media.find(m => m.camera === message.camera);
@@ -93,7 +104,8 @@ $('pause').onclick = async () => {
   else send({ type: 'bridge-resume' });
   $('pause').textContent = paused ? '恢复远端接入' : '暂停远端接入';
 };
-$('play-audio').onclick = () => { for (const player of document.querySelectorAll('#remote-media video,#remote-audio audio')) player.play().catch(e => error(e.message)); };
+$('play-audio').onclick = () => { void audioMonitor.activate(); for (const player of document.querySelectorAll('#remote-media video,#remote-audio audio')) player.play().catch(e => error(e.message)); };
 setInterval(() => { void rtc.stats(); report(); }, 3000);
 window.hostDiagnostics = () => ({ capture, peers: rtc.peers });
 connect();
+window.addEventListener('pagehide', () => audioMonitor.dispose());

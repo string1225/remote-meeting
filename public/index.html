@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 远程现场</title><link rel="stylesheet" href="./style.css"><script type="module" src="./app.js"></script></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 远程现场</title><link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./meeting.css"><link rel="stylesheet" href="./audio-meter.css"><script type="module" src="./app.js"></script></head>
 <body><header><a class="brand" href="./"><span class="brand-icon">◈</span> 同屏 <small>REMOTE WORKSPACE</small></a><span class="badge"><i></i> 远程现场</span></header><main>
 <section id="lobby" class="lobby"><div class="intro"><span class="eyebrow">YOUR WINDOW INTO THE DETAILS.</span><h1>连接现场，<br>看清每个细节。</h1><p>登录即可唤起现场主机的双摄像头与麦克风。<br>放大、移动视野，独立查看你关注的区域。</p><div class="features"><span>双摄高分辨率采集</span><span>独立视角</span><span>最高 1080p 局部串流</span></div><div class="flow"><b>现场常驻主机</b><span>⇄</span><b>远端网页 × 2</b><small>你的视野，由你控制。</small></div></div>
 <div class="setup panel"><div class="section-top"><span class="step">01</span><h2>连接现场主机</h2></div><form id="setup-form"><input id="name" type="hidden" value="远端用户">
@@ -14,10 +14,18 @@
 
 <p id="host-status" class="host-status">登录后查看主机状态</p><label>参与方式<select id="mode"><option value="video">摄像头 + 麦克风</option><option value="audio">仅麦克风</option><option value="listen">旁听 · 不开启设备</option></select></label>
 <button id="devices-button" type="button" class="secondary full">检测我的摄像头和麦克风</button><div id="device-fields" hidden><label id="camera1-field">我的摄像头<select id="camera1"></select></label><label id="mic-field">我的麦克风<select id="microphone"></select></label></div>
-<button id="join-button" type="submit" class="primary full">登录并连接主机 <span>↗</span></button><p class="hint">连接后，主机自动开启两路摄像头和麦克风。最多两位远端同时接入；请使用耳机避免回声。</p></form></div></section>
-<section id="meeting" hidden><div class="meeting-top"><div><span class="eyebrow">LIVE REMOTE WORKSPACE</span><h1>现场双视角 <span id="people-count">1 / 3</span></h1><p id="capture-info" class="hint">等待主机开启设备…</p></div><button id="play-audio" class="secondary">播放远端声音</button></div>
-<div class="workspace"><div><div id="host-videos" class="video-grid"></div><div id="empty-state" class="empty-state">正在唤起主机。两路摄像头画面将在这里显示。</div><h2 class="remote-heading">远端参与者</h2><div id="remote-videos" class="remote-grid"></div><div id="remote-audio"></div></div><aside class="panel"><div class="section-top"><span class="live-dot"></span><h2>连接状态</h2></div><div id="signal-status">正在连接…</div><div id="participants"></div><div class="side-note"><b>每人独立控制视野</b><p>滚轮或滑块放大；拖动画面移动视野。定位框显示当前查看区域，点击“全景复位”返回全景。</p><p>主机从高分辨率原始画面裁剪后发送最高 1080p 串流，720p 摄像头保持 720p。你的操作不影响另一位远端。</p></div></aside></div>
-<div class="controls"><button id="mute" class="secondary">关闭麦克风</button><button id="camera-toggle" class="secondary">关闭摄像头</button><button id="leave" class="danger">断开主机</button></div></section>
+<button id="join-button" type="submit" class="primary full">登录并连接主机 <span>↗</span></button><p class="hint">连接后，主机自动开启两路摄像头和麦克风。最多两位远端同时接入；请使用耳机避免回声。</p></form><div id="lobby-audio"></div></div></section>
+<section id="meeting" hidden><div class="meeting-top"><div><span class="eyebrow">LIVE REMOTE WORKSPACE</span><h1>现场主画面 <span id="people-count">1 / 3</span></h1><p id="capture-info" class="hint">等待主机开启设备…</p></div><button id="play-audio" class="secondary">播放远端声音</button></div>
+<div class="workspace">
+  <section class="main-stage" aria-label="主机主画面"><div id="host-videos"></div><div id="empty-state" class="empty-state">正在唤起主机，等待摄像头画面…</div></section>
+  <aside class="video-sidebar panel" aria-label="摄像头与远端参与者">
+    <h2>主机摄像头 <small>点击切换主画面</small></h2><div id="host-thumbnails" class="thumbnail-list"></div>
+    <h2 class="remote-heading">远端参与者</h2><div id="remote-videos" class="remote-grid"></div><p id="remote-empty" class="hint">尚无远端视频画面</p><div id="remote-audio"></div>
+    <details class="connection-details"><summary>连接状态</summary><div id="signal-status">正在连接…</div><div id="participants"></div></details>
+    <p class="hint sidebar-hint">方向键移动视野，＋ / − 调整倍率。也可滚轮缩放、拖动画面。每人独立控制。</p>
+  </aside>
+</div>
+<div class="meeting-bottom"><div id="meeting-audio"></div><div class="controls"><button id="mute" class="secondary">关闭麦克风</button><button id="camera-toggle" class="secondary">关闭摄像头</button><button id="leave" class="danger">断开主机</button></div></div></section>
     <dialog id="users-dialog" aria-labelledby="users-title">
       <div class="dialog-top"><div><span class="eyebrow">HOST ACCOUNTS</span><h2 id="users-title">远端账号管理</h2></div><button id="close-users" type="button" class="secondary" aria-label="关闭账号管理">关闭</button></div>
       <p class="hint">每个账号有独立口令，至少 6 位。管理员可管理账号，远端用户可连接主机。重置口令、停用或删除账号会使该账号退出登录，并断开该账号的远端连接。</p>

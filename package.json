@@ -12,6 +12,7 @@
     "dev": "node --watch --env-file-if-exists=.env server/index.js",
     "test": "node --test test/*.test.js",
     "test:e2e": "node test/browser.mjs",
+    "test:meeting-ui": "node test/meeting-ui-browser.mjs",
     "test:accounts": "node test/accounts-browser.mjs",
     "test:host-accounts": "node test/host-accounts-browser.mjs",
     "check": "node test/check.mjs",

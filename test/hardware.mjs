@@ -8,9 +8,9 @@ try {
   const remote = await remotePage(browser, stack.errors);
   assert.equal(await stack.host.evaluate(() => window.testTracks.length), 0);
   await connectRemote(remote, stack.url, stack.password);
-  await remote.waitForFunction(() => document.querySelectorAll('#host-videos video').length === 2 && [...document.querySelectorAll('#host-videos video')].every(v => [720,1080].includes(v.videoHeight) && v.videoWidth === v.videoHeight * 16 / 9 && v.readyState >= 2), null, { timeout: 60000 });
+  await remote.waitForFunction(() => document.querySelectorAll('#host-thumbnails video').length === 2 && [...document.querySelectorAll('#host-thumbnails video')].every(v => [720,1080].includes(v.videoHeight) && v.videoWidth === v.videoHeight * 16 / 9 && v.readyState >= 2), null, { timeout: 60000 });
   const devices = await stack.host.evaluate(() => { const d = window.hostDiagnostics(); return { cameras: d.capture.sources.map(s => ({ label: s.label, actual: { width:s.settings.width,height:s.settings.height,fps:s.settings.frameRate }, capabilities: { width:s.capabilities.width,height:s.capabilities.height } })), microphone: d.capture.audio.getAudioTracks()[0].label }; });
-  const received = await remote.locator('#host-videos video').evaluateAll(videos => videos.map(v => ({ width: v.videoWidth, height: v.videoHeight })));
+  const received = await remote.locator('#host-thumbnails video').evaluateAll(videos => videos.map(v => ({ width: v.videoWidth, height: v.videoHeight })));
   assert.deepEqual(received, [{width:1920,height:1080},{width:1280,height:720}]);
   console.log(JSON.stringify({ ...devices, received }, null, 2));
   await setView(remote, 0, 2, 0.25); await setView(remote, 1, 2, 0.75);

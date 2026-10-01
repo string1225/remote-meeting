@@ -1,0 +1,18 @@
+.audio-monitor{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:14px 16px;background:#edf4f1;border:1px solid #dbe8e2;border-radius:10px;color:#415660}
+.audio-local-levels{display:flex;gap:22px;flex:1;min-width:0;flex-wrap:wrap}
+.audio-level{display:grid;grid-template-columns:auto minmax(48px,1fr) 42px;align-items:center;gap:8px;min-width:195px;flex:1;font-size:11px;line-height:1.5}
+.audio-level-label{white-space:nowrap}.audio-level small{font-size:10px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.audio-level-bar{height:7px;min-width:40px;border-radius:10px;background:#b4c7c052;overflow:hidden}
+.audio-level-bar i{display:block;height:100%;width:0;background:#249d79;border-radius:10px;transition:width .1s linear}
+.audio-level-high .audio-level-bar i{background:#d99a26}
+.audio-test-actions{display:flex;gap:6px;flex-wrap:wrap}.audio-test-actions button{font-size:11px;padding:8px 10px}
+.audio-level-compact{min-width:0;max-width:210px;font-size:10px;grid-template-columns:auto minmax(30px,1fr) 36px;gap:6px;margin-top:5px}
+.video-card .audio-level,.host-thumbnail .audio-level{color:#effaf6}
+.video-card .audio-level-bar,.host-thumbnail .audio-level-bar{background:#ffffff35}
+.video-card .audio-level-bar i,.host-thumbnail .audio-level-bar i{background:#4de4a5}
+.host-thumbnail .audio-level{position:absolute;top:5px;left:7px;right:7px;margin:0;padding:4px 6px;background:#0b1925a8;border-radius:5px;pointer-events:none}
+#lobby-audio{margin-top:18px}#lobby-audio .audio-local-levels{gap:12px;flex-direction:column}#lobby-audio .audio-monitor{gap:12px}
+#host-audio{margin:18px 0}.meeting-bottom{display:flex;align-items:center;gap:16px;flex-wrap:wrap;flex-shrink:0}
+#meeting-audio{flex:1;min-width:250px}#meeting-audio .audio-monitor{padding:10px 12px;gap:12px}#meeting-audio .audio-local-levels{gap:10px 18px}
+@media(max-width:1050px){#meeting-audio .audio-local-levels{flex-direction:column;gap:6px}.meeting-bottom{gap:10px}}
+@media(max-width:700px){.audio-monitor{padding:12px}.audio-local-levels{gap:10px;flex-direction:column}.audio-level{min-width:0}#meeting-audio{flex-basis:100%}.meeting-bottom{justify-content:center}.audio-level-compact{grid-template-columns:auto minmax(24px,1fr) 32px;gap:4px;font-size:9px}.audio-level-compact small{font-size:9px}}

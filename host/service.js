@@ -4,6 +4,8 @@ import { WebSocket, WebSocketServer } from 'ws';
 
 const assets = new Map([['/', ['host/index.html', 'text/html']], ['/host-app.js', ['host/app.js', 'text/javascript']], ['/capture.js', ['host/capture.js', 'text/javascript']], ['/crop.js', ['host/crop.js', 'text/javascript']], ['/rtc.js', ['public/rtc.js', 'text/javascript']], ['/style.css', ['public/style.css', 'text/css']]]);
 assets.set('/host-accounts.js', ['host/accounts.js', 'text/javascript']);
+assets.set('/audio-meter.js', ['public/audio-meter.js', 'text/javascript']);
+assets.set('/audio-meter.css', ['public/audio-meter.css', 'text/css']);
 export function createHostService(config) {
   const url = new URL('agent', config.serverUrl);
   if (!['https:', 'http:'].includes(url.protocol) || (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname))) throw new Error('Use an HTTPS cloud URL');

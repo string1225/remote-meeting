@@ -8,6 +8,9 @@ import { authenticateAgent } from './agent-auth.js';
 const token = () => randomBytes(24).toString('base64url');
 const split = value => (value || '').split(',').map(v => v.trim()).filter(Boolean);
 const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/remote.js', ['remote.js', 'text/javascript']], ['/accounts.js', ['accounts.js', 'text/javascript']], ['/rtc.js', ['rtc.js', 'text/javascript']], ['/crop-controls.js', ['crop-controls.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']]]);
+assets.set('/meeting.css', ['meeting.css', 'text/css']);
+assets.set('/audio-meter.js', ['audio-meter.js', 'text/javascript']);
+assets.set('/audio-meter.css', ['audio-meter.css', 'text/css']);
 
 export function createMeetingServer(options = {}) {
   const env = { ...process.env, ...options };
