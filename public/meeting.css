@@ -7,11 +7,12 @@ body.meeting-active{height:100dvh;display:flex;flex-direction:column;overflow:hi
 #meeting .meeting-top h1{font-size:24px;margin:5px 0}
 #meeting .workspace{flex:1;min-height:0;grid-template-columns:minmax(0,1fr) 260px;gap:18px}
 .main-stage{position:relative;min-width:0;min-height:0;display:flex}
+.fullscreen-button{position:absolute;top:12px;right:12px;z-index:2;padding:10px 14px;background:#0b1925d9;border:1px solid #ffffff40;color:white;font-size:12px;backdrop-filter:blur(8px)}
 #host-videos{width:100%;min-height:0}
 #host-videos .camera-panel{height:100%;display:flex;flex-direction:column;box-shadow:0 6px 24px #10252d0a}
 #host-videos .video-card{flex:1;min-height:240px;aspect-ratio:auto}
 #host-videos video{display:block}
-#host-videos .caption{top:0;bottom:auto;padding:18px;background:linear-gradient(#0b141daa,transparent);pointer-events:none}
+#host-videos .caption{top:0;bottom:auto;padding:18px 115px 18px 18px;background:linear-gradient(#0b141daa,transparent);pointer-events:none}
 .main-stage .empty-state{width:100%;height:100%;margin:0;display:flex;align-items:center;justify-content:center;background:#142028;color:#c5d4dd;position:absolute;inset:0;border:none;min-height:240px}
 #meeting .video-sidebar{display:block;min-height:0;height:100%;align-self:stretch;overflow:auto;padding:16px;scrollbar-width:thin}
 .video-sidebar h2{font-size:13px;margin:0 0 12px;line-height:1.5}
@@ -44,3 +45,7 @@ body.meeting-active{height:100dvh;display:flex;flex-direction:column;overflow:hi
 @media(max-width:1050px){#meeting .workspace{grid-template-columns:minmax(0,1fr) 220px}#meeting .crop-bottom{display:none}#meeting .crop-controls{grid-template-columns:1fr}}
 @media(max-width:700px){body.meeting-active{height:auto;min-height:100dvh;overflow:auto}.meeting-active>header{padding:0 16px}.meeting-active>main{padding:16px 12px}#meeting{height:auto}#meeting .meeting-top h1{font-size:19px}#meeting .meeting-top h1 span{font-size:11px;margin-left:4px}#meeting .meeting-top>button{font-size:11px;padding:10px}#meeting .meeting-top .eyebrow{display:none}#meeting .workspace{grid-template-columns:1fr}#host-videos .video-card{height:clamp(280px,55dvh,480px);flex:auto}#meeting .video-sidebar{height:auto;overflow:visible}#meeting .thumbnail-list{display:grid;grid-template-columns:1fr 1fr}#meeting .remote-grid{grid-template-columns:1fr 1fr}.crop-overlay{bottom:12px;right:12px;padding:8px;gap:8px}.crop-pan{grid-template-columns:repeat(3,34px);grid-template-rows:repeat(3,34px)}.crop-overlay button{width:34px;height:34px;font-size:20px}.crop-zoom{padding-left:8px}.crop-zoom output{height:26px}#meeting .crop-controls{padding:12px}#meeting .controls{flex-wrap:wrap}#meeting .controls button{font-size:12px;padding:11px}}
 @media(min-width:701px) and (max-height:760px){.meeting-active>header{height:52px;min-height:52px}.meeting-active>main{padding-top:12px;padding-bottom:12px}#meeting{gap:10px}#meeting .meeting-top .eyebrow{display:none}#host-videos .video-card{min-height:160px}}
+.main-stage:fullscreen{width:100%;height:100%;padding:0;background:#0b141d}
+.main-stage:fullscreen #host-videos .camera-panel{border:0;border-radius:0}
+.main-stage:fullscreen #host-videos .video-card{flex:1;height:0;min-height:0}
+.main-stage:fullscreen .fullscreen-button{top:18px;right:18px}

@@ -103,7 +103,8 @@ export function createAudioMonitor({ container, requestMicrophone, onError = () 
       const level = sample(remote); values.set(remote.owner, (values.get(remote.owner) || 0) + level ** 2);
       if (!remote.player.paused && !remote.player.muted && remote.player.volume > 0) { output += (level * remote.player.volume) ** 2; playing = true; }
     }
-    speaker.render(Math.min(1, Math.sqrt(output)), context?.state !== 'running' && remotes.size ? '待启用' : !playing ? remotes.size ? '待播放' : '无播放' : '');
+    const muted = remotes.size > 0 && [...remotes.values()].every(remote => remote.player.muted || remote.player.volume === 0);
+    speaker.render(Math.min(1, Math.sqrt(output)), !tone && muted ? '已静音' : context?.state !== 'running' && remotes.size ? '待启用' : !playing ? remotes.size ? '待播放' : '无播放' : '');
     for (const meter of peerMeters) {
       if (!meter.element.isConnected) { peerMeters.delete(meter); continue; }
       meter.render(meter.owner === 'local' ? micLevel : Math.sqrt(values.get(meter.owner) || 0), meter.owner === 'local' ? micStatus : !values.has(meter.owner) ? '待接收' : context?.state !== 'running' ? '待启用' : '');

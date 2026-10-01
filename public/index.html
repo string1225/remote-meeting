@@ -17,7 +17,7 @@
 <button id="join-button" type="submit" class="primary full">登录并连接主机 <span>↗</span></button><p class="hint">连接后，主机自动开启两路摄像头和麦克风。最多两位远端同时接入；请使用耳机避免回声。</p></form><div id="lobby-audio"></div></div></section>
 <section id="meeting" hidden><div class="meeting-top"><div><span class="eyebrow">LIVE REMOTE WORKSPACE</span><h1>现场主画面 <span id="people-count">1 / 3</span></h1><p id="capture-info" class="hint">等待主机开启设备…</p></div><button id="play-audio" class="secondary">播放远端声音</button></div>
 <div class="workspace">
-  <section class="main-stage" aria-label="主机主画面"><div id="host-videos"></div><div id="empty-state" class="empty-state">正在唤起主机，等待摄像头画面…</div></section>
+  <section id="main-stage" class="main-stage" aria-label="主机主画面"><div id="host-videos"></div><div id="empty-state" class="empty-state">正在唤起主机，等待摄像头画面…</div><button id="main-fullscreen" type="button" class="fullscreen-button" aria-label="主画面全屏" aria-pressed="false" disabled>全屏查看</button></section>
   <aside class="video-sidebar panel" aria-label="摄像头与远端参与者">
     <h2>主机摄像头 <small>点击切换主画面</small></h2><div id="host-thumbnails" class="thumbnail-list"></div>
     <h2 class="remote-heading">远端参与者</h2><div id="remote-videos" class="remote-grid"></div><p id="remote-empty" class="hint">尚无远端视频画面</p><div id="remote-audio"></div>

@@ -2,6 +2,7 @@ import { initAccounts } from './accounts.js';
 import { MeetingRTC } from './rtc.js';
 import { cropControls } from './crop-controls.js';
 import { createAudioMonitor } from './audio-meter.js';
+import { createPlaybackControls } from './playback-controls.js';
 const $ = id => document.getElementById(id), base = new URL('./', location.href);
 let media = [], socket, ticket, active = false, joining = false, reconnectTimer, statsTimer, messageTimer, retry = 0, chain = Promise.resolve();
 const controllers = new Map(), views = new Map();
@@ -10,6 +11,25 @@ const sourceSizes = new Map();
 function notify(text, error = false) { clearTimeout(messageTimer); $('message').textContent = text; $('message').className = error ? 'error' : ''; $('message').hidden = false; messageTimer = setTimeout(() => { $('message').hidden = true; }, error ? 12000 : 5000); }
 const audioMonitor = createAudioMonitor({ container: $('lobby-audio'), onError: message => notify(message, true),
   requestMicrophone: () => navigator.mediaDevices.getUserMedia({ video: false, audio: { deviceId: $('microphone').value ? { exact: $('microphone').value } : undefined, echoCancellation: true, noiseSuppression: true } }) });
+const playback = createPlaybackControls({ button: $('play-audio'), container: $('remote-audio'), activate: audioMonitor.activate, onError: message => notify(message, true),
+  retryVideos: () => { for (const video of document.querySelectorAll('#meeting video')) if (video.srcObject) void video.play().catch(() => {}); } });
+const mainStage = $('main-stage'), fullscreenButton = $('main-fullscreen');
+function renderFullscreen() {
+  const fullscreen = document.fullscreenElement === mainStage;
+  fullscreenButton.textContent = fullscreen ? '退出全屏' : '全屏查看';
+  fullscreenButton.setAttribute('aria-pressed', String(fullscreen));
+  fullscreenButton.disabled = !fullscreen && (!document.fullscreenEnabled || !$('host-videos').querySelector('.camera-panel:not([hidden])'));
+  fullscreenButton.title = !document.fullscreenEnabled ? '当前浏览器不支持画面全屏' : fullscreen ? '退出全屏，也可按 Esc' : '全屏查看当前主摄像头';
+}
+fullscreenButton.onclick = async () => {
+  try {
+    if (document.fullscreenElement === mainStage) await document.exitFullscreen();
+    else await mainStage.requestFullscreen();
+  } catch { notify('无法进入全屏，请检查浏览器的全屏权限。', true); }
+  renderFullscreen();
+};
+document.addEventListener('fullscreenchange', renderFullscreen);
+renderFullscreen();
 const accounts = initAccounts(notify);
 function deviceError(e) { return ({ NotAllowedError: '请允许浏览器使用摄像头和麦克风。', NotFoundError: '未找到设备，请检查连接或选择旁听。', NotReadableError: '设备可能被其他程序占用，请关闭占用程序后重试。' })[e.name] || e.message; }
 async function api(path, method = 'GET') { const res = await fetch(new URL(`api/${path}`, base), { method }); const data = await res.json(); if (!res.ok) throw new Error(data.error); return data; }
@@ -40,7 +60,7 @@ const rtc = new MeetingRTC({ send, getMedia: async () => media, onTrack: addMedi
       const control = controllers.get(card.dataset.stream); if (control) { views.set(Number(card.dataset.camera), control.view); control.dispose(); controllers.delete(card.dataset.stream); }
       const player = card.matches('audio') ? card : card.querySelector('video'); if (player) player.srcObject = null; card.mediaStream = null; card.remove();
     }
-    renderMainView(); renderParticipants();
+    playback.refresh(); renderMainView(); renderParticipants();
   },
   onControlOpen() { for (const c of controllers.values()) c.resend(); },
   onControl(peer, m) { if (peer.info.role !== 'host' || m?.type !== 'viewport-applied') return; for (const [id, control] of controllers) { const card = [...$('host-videos').children].find(c => c.dataset.stream === id); if (Number(card?.dataset.camera) === m.camera) control.applied(m); } },
@@ -50,11 +70,14 @@ function addMedia(peer, stream, metadata = {}) {
   const local = peer.info.id === 'local', host = peer.info.role === 'host';
   const container = stream.getVideoTracks().length ? (host ? $('host-videos') : $('remote-videos')) : $('remote-audio');
   if ([...container.children].some(e => e.dataset.stream === stream.id)) return;
-  if (!stream.getVideoTracks().length) { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = stream; audio.dataset.owner = peer.info.id; audio.dataset.stream = stream.id; container.append(audio); audioMonitor.addRemote(peer.info.id, stream, audio); audio.play().catch(() => notify('点击“播放远端声音”启用声音。')); return; }
+  if (!stream.getVideoTracks().length) {
+    const audio = document.createElement('audio'); audio.srcObject = stream; audio.dataset.owner = peer.info.id; audio.dataset.stream = stream.id;
+    container.append(audio); audioMonitor.addRemote(peer.info.id, stream, audio); playback.add(audio); return;
+  }
   const outer = document.createElement('article'); outer.className = host ? 'camera-panel' : 'remote-panel'; outer.dataset.owner = peer.info.id; outer.dataset.stream = stream.id;
   if (host) outer.mediaStream = stream;
   const card = document.createElement('div'); card.className = 'video-card';
-  const video = document.createElement('video'); video.autoplay = true; video.playsInline = true; video.muted = local || host; if (!host) video.srcObject = stream;
+  const video = document.createElement('video'); video.autoplay = true; video.playsInline = true; video.muted = true; if (!host) video.srcObject = stream;
   const caption = document.createElement('div'); caption.className = 'caption'; caption.textContent = host ? `现场摄像头 ${(metadata.camera ?? 0) + 1}` : `${peer.info.name}${local ? '（我）' : ''}`;
   caption.append(audioMonitor.peerMeter(peer.info.id));
   card.append(video, caption); outer.append(card); container.append(outer); if (!host) video.play().catch(() => notify('点击“播放远端声音”启用播放。'));
@@ -94,6 +117,7 @@ function renderMainView() {
   }
   $('empty-state').hidden = !!selected;
   $('remote-empty').hidden = $('remote-videos').children.length > 0;
+  renderFullscreen();
 }
 function renderParticipants() {
   $('people-count').textContent = `${1 + rtc.peers.size} / 3`;
@@ -127,9 +151,11 @@ function connect() {
   ws.onclose = () => { clearTimeout(timeout); if (socket !== ws || !active) return; $('signal-status').textContent = '信令断开，正在恢复…'; if (++retry > 5) { leave(); notify('连接无法恢复，请重新登录连接。', true); return; } reconnectTimer = setTimeout(connect, Math.min(1000 * 2 ** (retry - 1), 5000)); };
 }
 function leave() {
+  if (document.fullscreenElement === mainStage) void document.exitFullscreen().catch(() => {});
   active = false; send({ type: 'leave' }); clearTimeout(reconnectTimer); clearInterval(statsTimer); const old = socket; socket = null; old?.close(); rtc.clear(); stopMedia(); ticket = null;
   audioMonitor.reset(); $('lobby-audio').append(audioMonitor.element);
   for (const c of controllers.values()) c.dispose(); controllers.clear(); $('host-videos').replaceChildren(); $('host-thumbnails').replaceChildren(); $('remote-videos').replaceChildren(); $('remote-audio').replaceChildren(); sourceSizes.clear(); cameraChoice = null; document.body.classList.remove('meeting-active'); $('meeting').hidden = true; $('lobby').hidden = false; void refreshStatus();
+  playback.reset(); renderFullscreen();
 }
 $('setup-form').onsubmit = async e => {
   e.preventDefault(); if (joining) return; setBusy(true);
@@ -146,6 +172,5 @@ $('setup-form').onsubmit = async e => {
 $('devices-button').onclick = async () => { setBusy(true); try { await detectDevices(); notify('设备已就绪。'); } catch (e) { notify(deviceError(e), true); } finally { setBusy(false); } };
 $('mode').onchange = refreshMode; $('leave').onclick = leave;
 for (const [id, kind, label] of [['mute', 'audio', '麦克风'], ['camera-toggle', 'video', '摄像头']]) $(id).onclick = () => { const tracks = media.flatMap(m => m.stream.getTracks()).filter(t => t.kind === kind); const enabled = !tracks.some(t => t.enabled); tracks.forEach(t => { t.enabled = enabled; }); $(id).textContent = `${enabled ? '关闭' : '开启'}${label}`; };
-$('play-audio').onclick = () => { void audioMonitor.activate(); for (const p of document.querySelectorAll('#meeting video,#meeting audio')) p.play().catch(() => {}); };
 document.addEventListener('account-change', refreshStatus); window.addEventListener('pagehide', leave); setInterval(() => { if (!active) void refreshStatus(); }, 10000); refreshMode();
 window.addEventListener('pagehide', () => audioMonitor.dispose());

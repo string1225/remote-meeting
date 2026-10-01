@@ -11,6 +11,7 @@ const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js
 assets.set('/meeting.css', ['meeting.css', 'text/css']);
 assets.set('/audio-meter.js', ['audio-meter.js', 'text/javascript']);
 assets.set('/audio-meter.css', ['audio-meter.css', 'text/css']);
+assets.set('/playback-controls.js', ['playback-controls.js', 'text/javascript']);
 
 export function createMeetingServer(options = {}) {
   const env = { ...process.env, ...options };

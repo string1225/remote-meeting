@@ -1,4 +1,9 @@
 .audio-monitor{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:14px 16px;background:#edf4f1;border:1px solid #dbe8e2;border-radius:10px;color:#415660}
+.playback-toggle{display:flex;flex-direction:column;gap:4px;align-items:center;white-space:nowrap;min-width:110px}
+.playback-toggle small{font-size:10px;font-weight:400}
+.playback-toggle[data-state="playing"]{background:#e0f1ea;color:#176951}
+.playback-toggle[data-state="muted"]{background:#f3e9e6;color:#90503e}
+.playback-toggle[data-state="blocked"],.playback-toggle[data-state="partial"]{background:#fff1d9;color:#805e29}
 .audio-local-levels{display:flex;gap:22px;flex:1;min-width:0;flex-wrap:wrap}
 .audio-level{display:grid;grid-template-columns:auto minmax(48px,1fr) 42px;align-items:center;gap:8px;min-width:195px;flex:1;font-size:11px;line-height:1.5}
 .audio-level-label{white-space:nowrap}.audio-level small{font-size:10px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}

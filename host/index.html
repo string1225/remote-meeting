@@ -1,7 +1,8 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 现场主机</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/audio-meter.css"><script type="module" src="/host-app.js"></script></head>
-<body><header><span class="brand">◈ 同屏 · 现场主机</span><span id="connection" class="badge">正在上线…</span></header><main>
-<div class="meeting-top"><div><span class="eyebrow">LOCAL HOST</span><h1>现场控制台 <span id="people-count">0 / 2 位远端</span></h1></div><button id="pause" class="danger">暂停远端接入</button></div>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 现场主机</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/audio-meter.css"><link rel="stylesheet" href="/host.css"><script type="module" src="/host-app.js"></script></head>
+<body class="host-console"><header><span class="brand">◈ 同屏 · 现场主机</span><span id="connection" class="badge">正在上线…</span></header><main>
+<div class="meeting-top"><div><span class="eyebrow">LOCAL HOST</span><h1>现场控制台 <span id="people-count">0 / 2 位远端</span></h1></div><div class="meeting-actions"><nav aria-label="主机视图"><button id="view-cameras" type="button" class="secondary" aria-controls="camera-view" aria-pressed="false">摄像头视图</button><button id="view-settings" type="button" class="secondary" aria-controls="access-settings" aria-pressed="true">人员配置</button></nav><button id="pause" class="danger">暂停远端接入</button></div></div>
+<p id="error" role="status" hidden></p>
 <div id="host-audio"></div>
 <section id="access-settings" class="panel access-settings" aria-labelledby="access-title">
   <div class="dialog-top"><div><span class="eyebrow">REMOTE ACCESS</span><h2 id="access-title">外部接入人员配置</h2></div><button id="refresh-accounts" type="button" class="secondary">刷新列表</button></div>
@@ -22,6 +23,11 @@
     </form>
   </div>
 </section>
-<div class="panel"><strong id="capture-status">待机 · 等待远端登录连接</strong><p class="hint">首位远端进入后自动开启两路摄像头和麦克风。原始画面留在本机，每位远端独立接收自己的两路 最高 1080p 裁剪画面。最后一位离开后自动释放设备。</p><p id="error" role="status" hidden></p><div id="sources" class="host-sources"></div></div>
-<h2>远端参与者</h2><div id="remote-media" class="video-grid"></div><div id="remote-audio"></div><div id="participants"></div><button id="play-audio" class="secondary">播放远端声音</button>
+<section id="camera-view" aria-label="摄像头视图" hidden>
+  <div class="host-live-grid">
+    <section class="panel host-camera-panel" aria-labelledby="local-cameras-title"><div class="host-camera-heading"><h2 id="local-cameras-title">本机摄像头</h2><strong id="capture-status">待机 · 等待远端登录连接</strong></div><div id="sources" class="host-sources"></div><p id="sources-empty" class="empty-state">远端接入后自动开启本机摄像头</p></section>
+    <section class="panel host-camera-panel" aria-labelledby="remote-cameras-title"><div class="host-camera-heading"><h2 id="remote-cameras-title">远端参与者</h2><button id="play-audio" class="secondary">播放远端声音</button></div><div id="remote-media" class="video-grid"></div><p id="remote-empty" class="empty-state">等待远端接入</p><div id="remote-audio"></div></section>
+  </div>
+  <details class="host-connections"><summary>连接状态</summary><div id="participants"></div></details>
+</section>
 </main><footer>此窗口由主机常驻程序管理；关闭窗口后会自动恢复。暂停接入请使用上方按钮。</footer></body></html>

@@ -1,0 +1,34 @@
+.host-console>header{height:64px;padding:0 26px}
+.host-console>main{max-width:none;padding:22px 26px}
+.host-console .meeting-top{margin-bottom:18px}
+.host-console .meeting-top h1{font-size:24px}
+.host-console .meeting-actions,.host-console nav{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.host-console nav{padding:4px;border:1px solid var(--line);border-radius:12px;background:white}
+.host-console nav button{padding:10px 12px;background:transparent;font-size:12px}
+.host-console nav button[aria-pressed="true"]{background:#e5f3ef;color:var(--teal)}
+.host-camera-view{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+.host-camera-view>header{flex-shrink:0}
+.host-camera-view>main{width:100%;flex:1;min-height:0;display:flex;flex-direction:column;margin:0;gap:14px}
+.host-camera-view>footer{display:none}
+.host-camera-view .meeting-top{margin:0;flex-shrink:0}
+.host-camera-view #host-audio{order:2;flex-shrink:0;margin:0}
+.host-camera-view #host-audio .audio-monitor{margin:0}
+#camera-view{display:flex;flex-direction:column;gap:10px;flex:1;min-height:0}
+.host-live-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;flex:1;min-height:0}
+.host-camera-panel{padding:16px;display:flex;flex-direction:column;min-height:0;min-width:0;gap:12px}
+.host-camera-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:48px;flex-shrink:0}
+.host-camera-heading h2{font-size:15px;margin:0;white-space:nowrap}
+.host-camera-heading strong{font-size:11px;font-weight:400;color:var(--teal);text-align:right}
+.host-camera-heading button{font-size:12px;padding:8px 12px}
+.host-camera-panel .host-sources,.host-camera-panel .video-grid{margin:0;display:grid;grid-template-columns:1fr;grid-template-rows:repeat(2,minmax(0,1fr));gap:12px;flex:1;min-height:0}
+.host-camera-panel .host-sources:empty,.host-camera-panel .video-grid:empty{display:none}
+.host-camera-panel .video-card{aspect-ratio:auto;min-height:0}
+.host-camera-panel .video-card video{display:block;width:100%;height:100%;max-height:none;border-radius:0;object-fit:contain}
+.host-camera-panel .caption{margin:0;font-size:11px;overflow-wrap:anywhere}
+.host-camera-panel .empty-state{flex:1;margin:0;display:flex;align-items:center;justify-content:center;background:#142028;color:#c5d4dd;border:0}
+.host-connections{font-size:11px;color:#647582;flex-shrink:0;max-height:100px;overflow:auto}
+.host-connections summary{cursor:pointer}
+.host-connections #participants{display:flex;flex-wrap:wrap;gap:8px 24px}
+.host-camera-view #error{margin:0;flex-shrink:0}
+@media(max-width:850px){.host-console .meeting-top{align-items:flex-start;flex-direction:column;gap:10px}.host-console .meeting-actions>button{padding:12px;font-size:12px}.host-camera-view .eyebrow{display:none}}
+@media(max-width:600px){.host-console>header{padding:0 14px}.host-console .brand{font-size:18px}.host-console>main{padding:16px 12px}.host-camera-view{height:auto;min-height:100dvh;overflow:auto}.host-live-grid{grid-template-columns:1fr}.host-camera-panel .host-sources,.host-camera-panel .video-grid{grid-template-rows:none}.host-camera-panel .video-card{aspect-ratio:16/9}.host-console .meeting-top h1{font-size:21px}.host-console .meeting-top h1 span{font-size:11px;margin-left:4px}}
