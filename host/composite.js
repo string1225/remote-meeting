@@ -1,7 +1,7 @@
 import { cropRect, normalizeView } from './crop.js';
 
 export function compositeSettings(output = {}) {
-  return { width: output.width === 1920 ? 1920 : 1280, height: output.width === 1920 ? 1080 : 720, fps: Math.max(5, Math.min(24, Math.round(Number(output.fps) || 15))) };
+  return { width: output.width === 1280 ? 1280 : 1920, height: output.width === 1280 ? 720 : 1080, fps: Math.max(5, Math.min(30, Math.round(Number(output.fps) || 30))) };
 }
 export function coverRect(width, height, view, aspect) {
   const rect = cropRect(width, height, view);

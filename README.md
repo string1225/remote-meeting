@@ -3,8 +3,8 @@
 当前 Windows 电脑提供一路共享合成画面：USB 摄像头铺满画面，笔记本前置摄像头固定在右下角。两位远端打开 [会议网站](https://home.sunny-string.cn/meeting/)登录，通过网页启动、停止现场摄像头并调整 USB 画面的缩放和位置。本地同时输出系统摄像头 **OBS Virtual Camera**，可在微信、腾讯会议等支持该设备的软件中选择。
 
 ```text
-USB 摄像头 ≤1080p/15fps ── 缩放、移动 ──┐
-笔记本摄像头 ≤640×480/15fps ── 右下角 ──┴─ 本地单张 canvas，720p/15fps
+USB 摄像头 ≤1080p/30fps ── 缩放、移动 ──┐
+笔记本摄像头 ≤640×480/30fps ── 右下角 ──┴─ 本地单张 canvas，1080p/30fps
                                               ├─ WebRTC → 远端 A
                                               ├─ WebRTC → 远端 B
                                               └─ OBS Virtual Camera → 微信 / 腾讯会议
@@ -19,7 +19,7 @@ USB 摄像头 ≤1080p/15fps ── 缩放、移动 ──┐
 2. 远端登录后点击“登录并连接主机”。可选择摄像头和麦克风、仅麦克风或旁听；连接仅自动开启主机会议麦克风，现场摄像头等待明确启动。
 3. 点击网页右侧“启动现场摄像头”，开启两路物理摄像头。左侧接收一路合成画面，USB 为主画面，笔记本为右下角画中画；最多两位远端接入。
 4. 用左下角的方向、＋ / −、复位按钮，或滑块、滚轮、拖动和定位框控制 USB 视野。支持 1–8× 数字缩放；画中画不随 USB 缩放或平移变化。
-5. 点击“停止现场摄像头”或本地“停止摄像头”释放两路物理摄像头及系统虚拟摄像头输出，会议语音继续。启动中可用本地“取消启动”取消；设备异常可停止后重试。
+5. 点击“停止现场摄像头”或本地“关闭摄像头”释放两路物理摄像头及系统虚拟摄像头输出，会议语音继续。启动中可用本地“取消启动”取消；设备异常可停止后重试。
 6. 最后一位远端离开约 3 秒后释放会议麦克风。已启动的画面持续输出，供微信等软件使用，直到明确停止；摄像头停止且无人接入时释放合成流。主机“暂停远端接入”会关闭所有设备；恢复接入后按需重新启动摄像头。
 7. 在微信或腾讯会议的摄像头列表中选择 **OBS Virtual Camera**，麦克风仍在对应软件中单独选择。本服务直接向已安装的 OBS 驱动送帧，无需运行 OBS 主程序；OBS 的虚拟摄像头输出须处于停止状态，以免占用同一个输出设备。
 
@@ -27,11 +27,11 @@ USB 摄像头 ≤1080p/15fps ── 缩放、移动 ──┐
 
 ## 采集、合成与系统虚拟摄像头
 
-- 默认输出为 **1280×720、15 fps**，本机实测 USB PC Camera 采集 **1920×1080、15 fps**，Surface Camera Front 采集 **640×480、15 fps**。不再打开旧的 8160×6120 模式。
+- 默认输出为 **1920×1080、30 fps**，本机实测 USB PC Camera 采集 **1920×1080、30 fps**，Surface Camera Front 采集 **640×480、30 fps**。不再打开旧的 8160×6120 模式。
 - 枚举时排除红外及虚拟摄像头，自动优先 USB / PC Camera，再选择笔记本前置设备；`cameras` 可明确指定主画面、画中画顺序。采集约束使用尺寸、帧率硬上限和 `resizeMode: none`，避免驱动先采集 8K 再缩小。
 - 只维护一张合成 canvas、一次绘制循环和一条合成视频轨道；两位远端使用同一轨道，原始物理摄像头轨道不进入 PeerConnection。每个 PeerConnection 仍需各自进行 WebRTC 编码。
 - USB 及画中画按比例裁剪铺满各自区域，不拉伸；画中画宽为输出宽的约 26%，与右边和下边保留 2% 的边距。USB 变焦不会增加传感器细节。
-- 默认每位远端视频码率上限 1.6 Mbps，两位合计约 3.2 Mbps，加音频和协议开销。可在本机配置 `output: { "width": 1920, "fps": 15 }` 改为 1080p，帧率支持 5–24 fps；1080p 码率上限每位 3 Mbps。
+- 默认每位远端视频码率上限 3 Mbps，两位合计约 6 Mbps，加音频和协议开销。合成、USB 采集及 WebRTC 发送帧率上限均为 30 fps，可配置 5–30 fps。其他软件直接使用原摄像头时，先在本地点击“关闭摄像头”，释放两路物理视频设备及系统虚拟摄像头输出；网页语音可继续使用。
 - 系统输出从同一合成 canvas 读取 RGBA 帧，通过仅监听回环地址、校验 Host / Origin 的独立 WebSocket 交给 Python / pyvirtualcam，再送到已安装的 OBS 驱动。最多一帧在途，慢时丢帧，不积累队列。系统输出故障在本地与远端显示，WebRTC 画面仍可继续。
 
 实现参考：[W3C Canvas Media Capture](https://www.w3.org/TR/mediacapture-fromelement/)、[pyvirtualcam](https://github.com/letmaik/pyvirtualcam)。
@@ -81,7 +81,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File host/install.ps1
 
 检查本机：`http://127.0.0.1:3034/api/status`；日志：`.local/host.log`。临时停止接入用窗口中的暂停按钮。取消自动启动时删除上述专用启动快捷方式；不要删除用户其他启动项。
 
-配置字段：`serverUrl` 必须以 `/meeting/` 结尾；`cameras` 按 USB、笔记本画中画填写两个完整设备名称；`microphone` 可指定设备名称；`output` 默认 `{ "width": 1280, "fps": 15 }`；`virtualCamera.enabled` 默认 true，`pythonPath` 可指定独立安装了依赖的解释器，默认 `.local/virtual-camera/Scripts/python.exe`；`idleMs` 控制无人接入时释放会议麦克风及已停止的合成流的等待时间；`headless: false` 保持可见窗口。
+配置字段：`serverUrl` 必须以 `/meeting/` 结尾；`cameras` 按 USB、笔记本画中画填写两个完整设备名称；`microphone` 可指定设备名称；`output` 默认 `{ "width": 1920, "fps": 30 }`；`virtualCamera.enabled` 默认 true，`pythonPath` 可指定独立安装了依赖的解释器，默认 `.local/virtual-camera/Scripts/python.exe`；`idleMs` 控制无人接入时释放会议麦克风及已停止的合成流的等待时间；`headless: false` 保持可见窗口。
 
 ## 云端部署
 

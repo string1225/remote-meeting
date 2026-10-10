@@ -135,7 +135,7 @@ function hostStatus(data) {
   $('host-status').textContent = labels[data.state] || '正在读取主机状态…';
   $('empty-state').textContent = data.state === 'offline' ? '主机已离线，等待重新连接…' : data.state === 'error' ? labels.error : '连接后点击“启动现场摄像头”';
   renderMainView();
-  if (active) $('capture-info').textContent = data.cameras?.length ? `${data.output?.width || 1280} × ${data.output?.height || 720} / ${data.output?.fps || 15} fps · USB ${data.cameras[0].width} × ${data.cameras[0].height} · 画中画 ${data.cameras[1]?.width || 0} × ${data.cameras[1]?.height || 0}` : labels[data.state];
+  if (active) $('capture-info').textContent = data.cameras?.length ? `${data.output?.width || 1920} × ${data.output?.height || 1080} / ${data.output?.fps || 30} fps · USB ${data.cameras[0].width} × ${data.cameras[0].height} · 画中画 ${data.cameras[1]?.width || 0} × ${data.cameras[1]?.height || 0}` : labels[data.state];
   renderCameraButton();
 }
 async function refreshStatus() { if (!accounts.current()) { $('host-status').textContent = '登录后查看主机状态'; return; } try { hostStatus(await api('host-status')); } catch {} }

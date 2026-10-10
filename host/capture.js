@@ -22,7 +22,7 @@ export async function captureHost(config = {}) {
     const selected = selectCameras(devices, config.cameras);
     for (const [index, device] of selected.entries()) {
       // Hard ceilings and no driver resizing avoid accidentally opening the 8K mode.
-      const fps = config.output?.fps || 15;
+      const fps = config.output?.fps || 30;
       const size = index === 0 ? { width: 1920, height: 1080 } : { width: 640, height: 480 };
       const stream = await navigator.mediaDevices.getUserMedia({ video: {
         deviceId: { exact: device.deviceId }, width: { ideal: size.width, max: size.width }, height: { ideal: size.height, max: size.height },

@@ -11,7 +11,7 @@ def main():
     import numpy as np
     import pyvirtualcam
     width, height, fps = map(int, sys.argv[1:4])
-    if (width, height) not in ((1280, 720), (1920, 1080)) or not 5 <= fps <= 24:
+    if (width, height) not in ((1280, 720), (1920, 1080)) or not 5 <= fps <= 30:
         raise ValueError("Unsupported virtual camera settings")
     size = width * height * 4
     with pyvirtualcam.Camera(width=width, height=height, fps=fps,

@@ -12,7 +12,7 @@ function pollState(page) {
   return page;
 }
 export async function instrument(context, syntheticHost = false, syntheticAudio = false) {
-  const syntheticFps = Math.max(1, Math.min(24, Number(process.env.E2E_CAPTURE_FPS) || 24));
+  const syntheticFps = Math.max(1, Math.min(30, Number(process.env.E2E_CAPTURE_FPS) || 30));
   await context.addInitScript(({ syntheticHost, syntheticAudio, syntheticFps }) => {
     window.testPeers = []; window.testSockets = []; window.testTracks = []; window.testMediaRequests = [];
     const PC = RTCPeerConnection, WS = WebSocket;
@@ -39,7 +39,7 @@ export async function instrument(context, syntheticHost = false, syntheticAudio 
         const canvas = document.createElement('canvas'); canvas.width = Math.min(3840, c.video.width?.max || 3840); canvas.height = canvas.width * 9 / 16;
         const ctx = canvas.getContext('2d'); ctx.fillStyle = camera ? '#14bf40' : '#e81919'; ctx.fillRect(0, 0, canvas.width / 2, canvas.height); ctx.fillStyle = camera ? '#e8ca16' : '#183be8'; ctx.fillRect(canvas.width / 2, 0, canvas.width / 2, canvas.height);
         let counter = 0; const timer = setInterval(() => { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 420, 100); ctx.fillStyle = '#000'; ctx.font = '40px sans-serif'; ctx.fillText(`Frame ${counter++}`, 15, 60); }, 120);
-        stream = canvas.captureStream(24);
+        stream = canvas.captureStream(30);
         const track = stream.getVideoTracks()[0], stop = track.stop.bind(track); track.stop = () => { clearInterval(timer); stop(); };
       } else if (syntheticAudio && c.audio && !c.video) {
         // Continuous, deterministic input avoids fake-device silence intervals

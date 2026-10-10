@@ -89,7 +89,7 @@ export class MeetingRTC {
       const params = sender.getParameters();
       if (!params.encodings?.length) continue;
       const height = sender.track.getSettings().height || 1080;
-      for (const e of params.encodings) { e.maxBitrate = sender.track.kind === 'video' ? (height <= 720 ? 1_600_000 : 3_000_000) : 64_000; if (sender.track.kind === 'video') e.maxFramerate = Math.min(24, sender.track.getSettings().frameRate || 24); }
+      for (const e of params.encodings) { e.maxBitrate = sender.track.kind === 'video' ? (height <= 720 ? 1_600_000 : 3_000_000) : 64_000; if (sender.track.kind === 'video') e.maxFramerate = Math.min(30, sender.track.getSettings().frameRate || 30); }
       try { await sender.setParameters(params); } catch { /* Browser-specific encoder limits. */ }
     }
   }

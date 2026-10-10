@@ -6,7 +6,7 @@ const live = !!process.env.E2E_BASE_URL, stack = live ? null : await localStack(
 const url = process.env.E2E_BASE_URL || stack.url, password = process.env.E2E_ADMIN_KEY || stack.password;
 const errors = stack?.errors || [], clients = [];
 const browser = await chromium.launch({ ...launchOptions, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] });
-const received = page => page.waitForFunction(() => document.querySelectorAll('#host-videos video').length === 1 && document.querySelector('#host-videos video').readyState >= 2 && document.querySelector('#host-videos video').videoHeight === 720, null, { timeout: 45000 });
+const received = page => page.waitForFunction(() => document.querySelectorAll('#host-videos video').length === 1 && document.querySelector('#host-videos video').readyState >= 2 && document.querySelector('#host-videos video').videoHeight === 1080, null, { timeout: 45000 });
 const synced = (page, zoom, x) => page.waitForFunction(({ zoom, x }) => {
   const controls = document.querySelector('.crop-controls');
   return Number(controls?.querySelector('input').value) === zoom && controls.querySelector('.crop-status').textContent.includes('画面已更新') && (!x || Math.abs(Number(controls.querySelector('.crop-map').getAttribute('aria-valuetext').match(/横向 (\d+)/)[1]) - x * 100) <= 2);
@@ -49,7 +49,7 @@ try {
         return senders.length === 1 && senders[0].track === d.session.composite.stream.getVideoTracks()[0] && !d.capture.sources.some(c => c.stream.getVideoTracks().includes(senders[0].track));
       });
     }), true);
-    assert.equal(await stack.host.evaluate(() => window.testMediaRequests.filter(r => r.video?.deviceId).every(r => r.video.width.max <= 1920 && r.video.height.max <= 1080 && r.video.frameRate.max === 15)), true);
+    assert.equal(await stack.host.evaluate(() => window.testMediaRequests.filter(r => r.video?.deviceId).every(r => r.video.width.max <= 1920 && r.video.height.max <= 1080 && r.video.frameRate.max === 30)), true);
   }
   await setView(clients[0], 0, 2, 0.25);
   await synced(clients[1], 2, 0.25);

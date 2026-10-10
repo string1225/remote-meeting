@@ -34,7 +34,7 @@ function state(value, message = '') {
   const cameras = capture?.sources.map(s => ({ label: s.label, width: s.settings.width, height: s.settings.height, frameRate: s.settings.frameRate })) || [];
   send({ type: 'host-state', state: value, cameras, output: session?.composite.settings || compositeSettings(config.output), message });
   $('capture-status').textContent = ({ idle: session?.audio ? '摄像头已停止 · 麦克风在线' : '待机 · 设备已关闭', starting: '正在开启两路摄像头…', capturing: '采集中 · USB 主画面 + 笔记本画中画', error: '摄像头开启失败' })[value];
-  $('local-camera-toggle').textContent = value === 'starting' ? '取消启动' : capture ? '停止摄像头' : '启动摄像头';
+  $('local-camera-toggle').textContent = value === 'starting' ? '取消启动' : capture ? '关闭摄像头' : '启动摄像头';
   $('local-camera-toggle').disabled = paused;
   $('sources-empty').hidden = !!session;
   $('sources-empty').textContent = '远端连接后点击“启动现场摄像头”';

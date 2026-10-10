@@ -125,11 +125,13 @@ try {
     const control = cropControls(document.createElement('video'), 0, undefined, message => {
       sent++;
       if (sent === 1) return false;
-      setTimeout(() => control.applied({ ...message, sourceWidth: 3840, sourceHeight: 2160, outputWidth: 1920, outputHeight: 1080 }), 0);
+      setTimeout(() => control.applied({ ...message, shared: true, sourceWidth: 3840, sourceHeight: 2160, outputWidth: 1920, outputHeight: 1080 }), 0);
       return true;
     });
     control.overlay.querySelector('[data-zoom="in"]').click();
-    control.applied({ zoom: 1, x: 0.5, y: 0.5, sourceWidth: 3840, sourceHeight: 2160, outputWidth: 1920, outputHeight: 1080 });
+    const oldAck = { zoom: 1, x: 0.5, y: 0.5, shared: true, sourceWidth: 3840, sourceHeight: 2160, outputWidth: 1920, outputHeight: 1080 };
+    control.applied(oldAck);
+    setTimeout(() => control.applied(oldAck), 200);
     const ignoredOldAck = !control.element.textContent.includes('USB 画面已更新');
     await new Promise(resolve => setTimeout(resolve, 1100));
     const applied = control.element.textContent.includes('1.5×') && control.element.textContent.includes('USB 画面已更新');

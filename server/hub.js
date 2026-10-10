@@ -80,7 +80,7 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
         if (msg.type === 'host-state' && agent) {
           if (!['idle', 'starting', 'capturing', 'error'].includes(msg.state)) return;
           hostState = { state: msg.state, message: String(msg.message || '').slice(0, 240), cameras: (Array.isArray(msg.cameras) ? msg.cameras : []).slice(0, 2).map((c, index) => ({ camera: index, label: String(c.label || '').slice(0, 100), width: Math.max(0, Math.min(32768, Number(c.width) || 0)), height: Math.max(0, Math.min(32768, Number(c.height) || 0)), frameRate: Math.max(0, Math.min(120, Number(c.frameRate) || 0)) })) };
-          hostState.output = { width: msg.output?.width === 1920 ? 1920 : 1280, height: msg.output?.width === 1920 ? 1080 : 720, fps: Math.max(5, Math.min(24, Math.round(Number(msg.output?.fps) || 15))) };
+          hostState.output = { width: msg.output?.width === 1280 ? 1280 : 1920, height: msg.output?.width === 1280 ? 720 : 1080, fps: Math.max(5, Math.min(30, Math.round(Number(msg.output?.fps) || 30))) };
           broadcast({ type: 'host-state', ...hostState }, peer); return;
         }
         if (msg.type !== 'signal') return;

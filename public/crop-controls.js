@@ -1,6 +1,6 @@
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export function cropControls(video, camera, initial, send) {
-  let view = { zoom: 1, x: 0.5, y: 0.5, ...initial }, timer, retryTimer, retryDelay = 750, pending = false, disposed = false, enabled = true, source = { width: 16, height: 9 };
+  let view = { zoom: 1, x: 0.5, y: 0.5, ...initial }, timer, retryTimer, retryDelay = 750, pending = false, awaiting = false, disposed = false, enabled = true, appliedText = '', source = { width: 16, height: 9 };
   const panel = document.createElement('div'); panel.className = 'crop-controls'; panel.dataset.camera = camera;
   panel.innerHTML = '<div class="crop-top"><label>放大<input type="range" min="1" max="8" step="0.1"></label><output></output><button type="button" class="secondary">全景复位</button></div><div class="crop-bottom"><div class="crop-map" role="slider" tabindex="0"><div class="crop-region"></div></div><small>拖动画面或点击定位框移动视野</small></div><small class="crop-status">等待主机控制通道…</small>';
   const slider = panel.querySelector('input'), value = panel.querySelector('output'), map = panel.querySelector('.crop-map'), region = panel.querySelector('.crop-region'), status = panel.querySelector('.crop-status');
@@ -23,11 +23,12 @@ export function cropControls(video, camera, initial, send) {
   function transmit() {
     if (disposed || !enabled) return;
     clearTimeout(timer); clearTimeout(retryTimer); pending = false;
+    awaiting = true;
     status.textContent = send({ type: 'viewport', camera, zoom: view.zoom, x: view.x, y: view.y }) ? '正在更新 USB 画面…' : '等待主机控制通道…';
     // Retry the latest view after a temporarily full/unavailable control channel.
     retryTimer = setTimeout(transmit, retryDelay); retryDelay = Math.min(2000, retryDelay * 2);
   }
-  function update() { if (!enabled) return; retryDelay = 750; render(); if (!pending) { pending = true; timer = setTimeout(transmit, 80); } }
+  function update() { if (!enabled) return; awaiting = true; retryDelay = 750; render(); if (!pending) { pending = true; timer = setTimeout(transmit, 80); } }
   function zoom(next, x = 0.5, y = 0.5) { const z = clamp(next, 1, 8); view.x += (x - 0.5) * (1 / view.zoom - 1 / z); view.y += (y - 0.5) * (1 / view.zoom - 1 / z); view.zoom = z; update(); }
   const reset = () => { view = { zoom: 1, x: 0.5, y: 0.5 }; update(); };
   const pan = direction => { const d = 0.15 / view.zoom; if (direction === 'left') view.x -= d; if (direction === 'right') view.x += d; if (direction === 'up') view.y -= d; if (direction === 'down') view.y += d; update(); };
@@ -46,14 +47,24 @@ export function cropControls(video, camera, initial, send) {
   const wheel = e => { if (!enabled) return; e.preventDefault(); const r = content(); zoom(view.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), clamp((e.clientX - r.left) / r.width, 0, 1), clamp((e.clientY - r.top) / r.height, 0, 1)); };
   video.addEventListener('wheel', wheel, { passive: false }); render();
   return { element: panel, overlay, get view() { return { ...view }; }, resend: transmit,
-    setEnabled(value) { enabled = value; if (!value) { clearTimeout(timer); clearTimeout(retryTimer); pending = false; drag = null; status.textContent = '启动现场摄像头后可控制 USB 画面'; } render(); },
+    setEnabled(value) {
+      const wasEnabled = enabled; enabled = value;
+      if (!value) { clearTimeout(timer); clearTimeout(retryTimer); pending = awaiting = false; drag = null; status.textContent = '启动现场摄像头后可控制 USB 画面'; }
+      else if (!wasEnabled && !awaiting) status.textContent = appliedText || '等待主机控制通道…';
+      render();
+    },
     applied(m) {
       if (![m.zoom, m.x, m.y].every(Number.isFinite)) return;
       source = { width: m.outputWidth || 16, height: m.outputHeight || 9 };
+      // Preserve the latest local edit until the host acknowledges it. A delayed
+      // shared update must not cancel an unsent edit or its retry.
+      const matches = ['zoom', 'x', 'y'].every(key => Math.abs(m[key] - view[key]) < 0.00001);
+      if (awaiting && !matches) return;
       if (m.shared) { view = { zoom: m.zoom, x: m.x, y: m.y }; render(); }
-      else if (!['zoom', 'x', 'y'].every(key => Math.abs(m[key] - view[key]) < 0.00001)) return;
-      clearTimeout(timer); clearTimeout(retryTimer); pending = false; retryDelay = 750;
-      status.textContent = enabled ? `USB 画面已更新 · ${m.outputWidth} × ${m.outputHeight} · ${m.zoom.toFixed(1)}× · 所有远端同步` : '启动现场摄像头后可控制 USB 画面';
+      else if (!matches) return;
+      clearTimeout(timer); clearTimeout(retryTimer); pending = awaiting = false; retryDelay = 750;
+      appliedText = `USB 画面已更新 · ${m.outputWidth} × ${m.outputHeight} · ${m.zoom.toFixed(1)}× · 所有远端同步`;
+      status.textContent = enabled ? appliedText : '启动现场摄像头后可控制 USB 画面';
     },
     dispose() { disposed = true; clearTimeout(timer); clearTimeout(retryTimer); video.removeEventListener('wheel', wheel); video.onpointerdown = video.onpointermove = video.onpointerup = video.onpointercancel = null; }
   };
