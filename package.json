@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Persistent dual-camera host with authenticated remote access and per-viewer WebRTC crops",
+  "description": "Low-load shared USB camera and laptop picture-in-picture host with remote controls",
   "engines": {
     "node": ">=22"
   },

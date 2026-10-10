@@ -6,6 +6,8 @@
   "browserPath": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
   "cameras": [],
   "microphone": "",
+  "output": { "width": 1280, "fps": 15 },
+  "virtualCamera": { "enabled": true },
   "idleMs": 3000,
   "headless": false
 }

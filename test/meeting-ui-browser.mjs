@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
-import { localStack, launchOptions, remotePage, connectRemote } from './browser-fixture.mjs';
+import { localStack, launchOptions, remotePage, connectRemote, startCameras } from './browser-fixture.mjs';
 
 const stack = await localStack();
 const browser = await chromium.launch({ ...launchOptions, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] });
@@ -17,15 +17,15 @@ try {
   await mkdir('test-results', { recursive: true });
   await preview(stack.host);
   const page = await remotePage(browser, stack.errors); await page.goto(stack.url); await preview(page);
-  await connectRemote(page, stack.url, stack.password);
-  await page.waitForFunction(() => document.querySelectorAll('#host-thumbnails video').length === 2 && [...document.querySelectorAll('#host-thumbnails video')].every(video => video.readyState >= 2));
+  await connectRemote(page, stack.url, stack.password); await startCameras(page);
+  await page.waitForFunction(() => document.querySelectorAll('#host-videos video').length === 1 && [...document.querySelectorAll('#host-videos video')].every(video => video.readyState >= 2));
   assert.equal(await stack.host.locator('#camera-view').isVisible(), true);
   assert.equal(await stack.host.locator('#access-settings').isVisible(), false);
-  await stack.host.waitForFunction(() => document.querySelectorAll('#sources video,#remote-media video').length === 3 && [...document.querySelectorAll('#sources video,#remote-media video')].every(video => video.readyState >= 2));
-  assert.equal(await stack.host.evaluate(() => [...document.querySelectorAll('#sources video,#remote-media video')].every(video => { const r = video.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.top >= 0 && r.bottom <= innerHeight; })), true);
+  await stack.host.waitForFunction(() => document.querySelectorAll('#sources canvas,#remote-media video').length === 2 && [...document.querySelectorAll('#remote-media video')].every(video => video.readyState >= 2));
+  assert.equal(await stack.host.evaluate(() => [...document.querySelectorAll('#sources canvas,#remote-media video')].every(video => { const r = video.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.top >= 0 && r.bottom <= innerHeight; })), true);
   await stack.host.screenshot({ path: 'test-results/host-camera-view.png', fullPage: true });
   await level(page, '[data-audio-kind="microphone"] [role="meter"]'); await level(page, '[data-audio-kind="speaker"] [role="meter"]');
-  await level(page, '#host-thumbnails [role="meter"]'); await level(stack.host, '#remote-media [role="meter"]');
+  await level(page, '#host-videos [role="meter"]'); await level(stack.host, '#remote-media [role="meter"]');
   console.log('PASS: pre-connection microphone/speaker tests and live local/peer audio meters.');
   await stack.host.locator('#view-settings').click();
   await stack.host.locator('#remote-name').fill('未保存的配置草稿');
@@ -38,7 +38,7 @@ try {
   assert.equal(await page.locator('#play-audio').getAttribute('aria-pressed'), 'true');
   assert.match(await page.locator('#play-audio').textContent(), /播放远端声音.*已静音/);
   assert.equal(await page.evaluate(() => [...document.querySelectorAll('#remote-audio audio')].every(audio => audio.muted)), true);
-  await level(page, '#host-thumbnails [role="meter"]');
+  await level(page, '#host-videos [role="meter"]');
   await level(page, '[data-audio-kind="microphone"] [role="meter"]');
   // Reject playback as an autoplay policy would, then retry with a user click.
   await page.evaluate(() => { for (const audio of document.querySelectorAll('#remote-audio audio')) { audio.pause(); audio.play = () => Promise.reject(new DOMException('Autoplay blocked', 'NotAllowedError')); } });
@@ -55,16 +55,12 @@ try {
   await stack.host.locator('#view-cameras').click();
   assert.equal(await stack.host.evaluate(() => window.hostDiagnostics().peers.size), 1);
   console.log('PASS: host auto camera view, settings remain editable during calls; output mute, autoplay failure/retry, independent input/peer meters.');
-  await stack.host.evaluate(() => window.testSockets[0].send(JSON.stringify({ type: 'host-state', state: 'capturing', cameras: [{ width: 3840, height: 2160 }, { width: 7680, height: 4320 }] })));
-  await page.waitForFunction(() => document.querySelector('#host-thumbnails [data-camera="1"]').getAttribute('aria-pressed') === 'true');
-  await page.locator('#host-thumbnails [data-camera="0"]').click();
-  await stack.host.evaluate(() => window.testSockets[0].send(JSON.stringify({ type: 'host-state', state: 'capturing', cameras: window.hostDiagnostics().capture.sources.map(source => source.settings) })));
   const stage = await page.locator('.main-stage').boundingBox(), sidebar = await page.locator('.video-sidebar').boundingBox();
   assert.ok(stage.x < sidebar.x && stage.width > sidebar.width * 2);
   assert.equal(await page.locator('#host-videos > :visible').count(), 1);
   const overlay = page.locator('#host-videos [data-camera="0"] .crop-overlay');
   const hostView = expected => stack.host.waitForFunction(expected => {
-    const view = [...window.hostDiagnostics().peers.values()][0]?.media.find(m => m.camera === 0)?.view;
+    const view = window.hostDiagnostics().session?.composite.view;
     return view && Object.entries(expected).every(([key, value]) => Math.abs(view[key] - value) < 0.01);
   }, expected, { polling: 100 });
   await page.locator('#main-fullscreen').click();
@@ -79,18 +75,16 @@ try {
   await page.screenshot({ path: 'test-results/meeting-fullscreen.png' });
   await page.locator('#main-fullscreen').click();
   await page.waitForFunction(() => !document.fullscreenElement);
-  await page.locator('#host-thumbnails [data-camera="1"]').click();
   await page.locator('#main-fullscreen').click();
-  await page.waitForFunction(() => !!document.fullscreenElement && !document.querySelector('#host-videos [data-camera="1"]').hidden);
+  await page.waitForFunction(() => !!document.fullscreenElement);
   await page.evaluate(() => document.exitFullscreen());
   await page.waitForFunction(() => document.querySelector('#main-fullscreen').textContent === '全屏查看');
-  await page.locator('#host-thumbnails [data-camera="0"]').click();
   console.log('PASS: selected camera native fullscreen, pan/zoom while fullscreen, exit button and browser fullscreenchange.');
   await overlay.getByRole('button', { name: '放大主画面' }).click(); await hostView({ zoom: 1.5 });
-  await page.locator('#host-thumbnails [data-camera="1"]').click(); await page.locator('#host-thumbnails [data-camera="0"]').click();
+  assert.equal(await page.locator('#host-videos .camera-panel').count(), 1);
   assert.equal(await page.locator('.crop-controls[data-camera="0"] input').inputValue(), '1.5');
   await overlay.getByRole('button', { name: '全景复位' }).click(); await hostView({ zoom: 1, x: 0.5, y: 0.5 });
-  console.log('PASS: resolution-based main selection, sidebar switching, independent retained views, overlay pan/zoom/reset.');
+  console.log('PASS: single composite main view, USB overlay pan/zoom/reset.');
   await page.screenshot({ path: 'test-results/meeting-ui-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 1280, height: 720 });
   assert.equal(await page.locator('#leave').isVisible(), true);
@@ -113,6 +107,8 @@ try {
   await page.screenshot({ path: 'test-results/meeting-ui-two-remotes.png', fullPage: true });
   await second.locator('#leave').click();
   await page.waitForFunction(() => document.querySelectorAll('#remote-videos video').length === 1);
+  await page.locator('#host-camera-toggle').click();
+  await page.waitForFunction(() => document.querySelector('#host-camera-toggle').textContent === '启动现场摄像头');
   await page.locator('#main-fullscreen').click();
   await page.waitForFunction(() => !!document.fullscreenElement);
   await page.evaluate(() => document.querySelector('#leave').click());
@@ -134,9 +130,9 @@ try {
     });
     control.overlay.querySelector('[data-zoom="in"]').click();
     control.applied({ zoom: 1, x: 0.5, y: 0.5, sourceWidth: 3840, sourceHeight: 2160, outputWidth: 1920, outputHeight: 1080 });
-    const ignoredOldAck = !control.element.textContent.includes('主机已裁剪');
+    const ignoredOldAck = !control.element.textContent.includes('USB 画面已更新');
     await new Promise(resolve => setTimeout(resolve, 1100));
-    const applied = control.element.textContent.includes('1.5×') && control.element.textContent.includes('主机已裁剪');
+    const applied = control.element.textContent.includes('1.5×') && control.element.textContent.includes('USB 画面已更新');
     const acknowledged = sent;
     await new Promise(resolve => setTimeout(resolve, 1600));
     control.dispose(); return { ignoredOldAck, applied, acknowledged, sent };

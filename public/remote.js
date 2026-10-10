@@ -5,9 +5,8 @@ import { createAudioMonitor } from './audio-meter.js';
 import { createPlaybackControls } from './playback-controls.js';
 const $ = id => document.getElementById(id), base = new URL('./', location.href);
 let media = [], socket, ticket, active = false, joining = false, reconnectTimer, statsTimer, messageTimer, retry = 0, chain = Promise.resolve();
-const controllers = new Map(), views = new Map();
-let cameraChoice = null;
-const sourceSizes = new Map();
+const controllers = new Map();
+let hostCaptureState = 'offline', sharedView, cameraRequestTimer;
 function notify(text, error = false) { clearTimeout(messageTimer); $('message').textContent = text; $('message').className = error ? 'error' : ''; $('message').hidden = false; messageTimer = setTimeout(() => { $('message').hidden = true; }, error ? 12000 : 5000); }
 const audioMonitor = createAudioMonitor({ container: $('lobby-audio'), onError: message => notify(message, true),
   requestMicrophone: () => navigator.mediaDevices.getUserMedia({ video: false, audio: { deviceId: $('microphone').value ? { exact: $('microphone').value } : undefined, echoCancellation: true, noiseSuppression: true } }) });
@@ -57,13 +56,18 @@ const rtc = new MeetingRTC({ send, getMedia: async () => media, onTrack: addMedi
   onRemove(peer) {
     audioMonitor.removeRemote(peer.info.id);
     for (const card of document.querySelectorAll('[data-owner]')) if (card.dataset.owner === peer.info.id) {
-      const control = controllers.get(card.dataset.stream); if (control) { views.set(Number(card.dataset.camera), control.view); control.dispose(); controllers.delete(card.dataset.stream); }
+      const control = controllers.get(card.dataset.stream); if (control) { control.dispose(); controllers.delete(card.dataset.stream); }
       const player = card.matches('audio') ? card : card.querySelector('video'); if (player) player.srcObject = null; card.mediaStream = null; card.remove();
     }
     playback.refresh(); renderMainView(); renderParticipants();
   },
-  onControlOpen() { for (const c of controllers.values()) c.resend(); },
-  onControl(peer, m) { if (peer.info.role !== 'host' || m?.type !== 'viewport-applied') return; for (const [id, control] of controllers) { const card = [...$('host-videos').children].find(c => c.dataset.stream === id); if (Number(card?.dataset.camera) === m.camera) control.applied(m); } },
+  onControlOpen: renderCameraButton,
+  onControl(peer, m) {
+    if (peer.info.role !== 'host') return;
+    if (m?.type === 'camera-state') { hostCaptureState = m.state; renderCameraButton(); }
+    else if (m?.type === 'virtual-camera-state') { $('system-camera-status').textContent = m.state === 'ready' ? '系统虚拟摄像头已输出 · OBS Virtual Camera' : m.state === 'error' ? `系统虚拟摄像头异常：${m.message}` : m.state === 'starting' ? '系统虚拟摄像头正在启动…' : ''; }
+    else if (m?.type === 'viewport-applied' && m.camera === 0) { sharedView = m; for (const control of controllers.values()) control.applied(m); }
+  },
   onError(e) { notify(e.message, true); }
 });
 function addMedia(peer, stream, metadata = {}) {
@@ -81,56 +85,58 @@ function addMedia(peer, stream, metadata = {}) {
   const caption = document.createElement('div'); caption.className = 'caption'; caption.textContent = host ? `现场摄像头 ${(metadata.camera ?? 0) + 1}` : `${peer.info.name}${local ? '（我）' : ''}`;
   caption.append(audioMonitor.peerMeter(peer.info.id));
   card.append(video, caption); outer.append(card); container.append(outer); if (!host) video.play().catch(() => notify('点击“播放远端声音”启用播放。'));
-  if (host && [0, 1].includes(metadata.camera)) {
-    outer.dataset.camera = metadata.camera;
-    const c = cropControls(video, metadata.camera, views.get(metadata.camera), data => { views.set(metadata.camera, { zoom: data.zoom, x: data.x, y: data.y }); return rtc.control(peer.info.id, data); }); controllers.set(stream.id, c); outer.append(c.element); card.append(c.overlay); c.resend();
-    const thumbnail = document.createElement('button'); thumbnail.type = 'button'; thumbnail.className = 'host-thumbnail';
-    thumbnail.dataset.owner = peer.info.id; thumbnail.dataset.stream = stream.id; thumbnail.dataset.camera = metadata.camera;
-    thumbnail.setAttribute('aria-label', `将主机摄像头 ${metadata.camera + 1} 设为主画面`);
-    const preview = document.createElement('video'); preview.autoplay = true; preview.playsInline = true; preview.muted = true; preview.srcObject = stream;
-    const label = document.createElement('span'); label.className = 'thumbnail-label';
-    thumbnail.append(preview, label, audioMonitor.peerMeter(peer.info.id)); thumbnail.onclick = () => { cameraChoice = metadata.camera; renderMainView(); };
-    $('host-thumbnails').append(thumbnail); preview.play().catch(() => {});
+  if (host) {
+    outer.dataset.camera = 0; caption.firstChild.textContent = '现场合成画面 · USB + 笔记本画中画';
+    const c = cropControls(video, 0, sharedView, data => rtc.control(peer.info.id, data));
+    controllers.set(stream.id, c); outer.append(c.element); card.append(c.overlay);
+    c.setEnabled(hostCaptureState === 'capturing'); if (sharedView) c.applied(sharedView);
   }
   renderMainView();
 }
 function renderMainView() {
   const panels = [...$('host-videos').children];
-  const area = panel => { const size = sourceSizes.get(Number(panel.dataset.camera)); return (size?.width || 0) * (size?.height || 0); };
-  const preferred = panels.find(panel => cameraChoice !== null && Number(panel.dataset.camera) === cameraChoice);
-  const selected = preferred || [...panels].sort((a, b) => area(b) - area(a) || Number(a.dataset.camera) - Number(b.dataset.camera))[0];
+  const selected = panels[0];
   for (const panel of panels) {
     panel.hidden = panel !== selected;
     const video = panel.querySelector('video'), stream = panel === selected ? panel.mediaStream : null;
-    // Only the selected full-size player consumes frames; both sidebar
-    // previews retain their streams without requesting additional tracks.
     if (video.srcObject !== stream) {
       video.srcObject = stream;
       if (stream) video.play().catch(error => { if (error.name !== 'AbortError') notify('点击“播放远端声音”启用播放。'); });
     }
   }
-  for (const thumbnail of $('host-thumbnails').children) {
-    const camera = Number(thumbnail.dataset.camera), size = sourceSizes.get(camera), chosen = thumbnail.dataset.stream === selected?.dataset.stream;
-    thumbnail.setAttribute('aria-pressed', String(chosen));
-    thumbnail.querySelector('.thumbnail-label').textContent = `摄像头 ${camera + 1}${chosen ? ' · 主画面' : ''}${size?.width ? ` · ${size.width} × ${size.height}` : ''}`;
-    thumbnail.style.order = camera;
-  }
   $('empty-state').hidden = !!selected;
   $('remote-empty').hidden = $('remote-videos').children.length > 0;
   renderFullscreen();
 }
+function renderCameraButton() {
+  const host = [...rtc.peers.values()].find(p => p.info.role === 'host');
+  const connected = host?.channel?.readyState === 'open', button = $('host-camera-toggle');
+  button.disabled = !connected || hostCaptureState === 'starting';
+  button.textContent = hostCaptureState === 'starting' ? '正在启动现场摄像头…' : hostCaptureState === 'capturing' ? '停止现场摄像头' : '启动现场摄像头';
+  button.setAttribute('aria-pressed', String(hostCaptureState === 'capturing'));
+  for (const control of controllers.values()) control.setEnabled(connected && hostCaptureState === 'capturing');
+  clearTimeout(cameraRequestTimer);
+}
+$('host-camera-toggle').onclick = () => {
+  const host = [...rtc.peers.values()].find(p => p.info.role === 'host');
+  if (!host || !rtc.control(host.info.id, { type: hostCaptureState === 'capturing' ? 'camera-stop' : 'camera-start' })) { notify('主机控制通道尚未连接，请稍后重试。', true); renderCameraButton(); return; }
+  $('host-camera-toggle').disabled = true;
+  cameraRequestTimer = setTimeout(() => { renderCameraButton(); notify('暂未收到摄像头状态，请检查主机后重试。', true); }, 15000);
+};
 function renderParticipants() {
   $('people-count').textContent = `${1 + rtc.peers.size} / 3`;
   const names = { new: '等待连接', connecting: '正在连接', connected: '已连接', disconnected: '网络波动', failed: '直连失败：尝试热点或独立 TURN', closed: '已关闭' };
   $('participants').replaceChildren(...[...rtc.peers.values()].map(p => { const row = document.createElement('div'); row.className = 'participant'; const name = document.createElement('strong'); name.textContent = p.info.name; const status = document.createElement('small'); status.textContent = `${p.link || names[p.pc.connectionState]}${p.detail ? ' · ' + p.detail : ''}`; row.append(name, status, audioMonitor.peerMeter(p.info.id)); return row; }));
+  renderCameraButton();
 }
 function hostStatus(data) {
-  const labels = { offline: '主机离线 · 等待主机程序上线', idle: '主机在线 · 连接后自动开启设备', starting: '主机正在开启摄像头和麦克风…', capturing: '主机采集中 · 两路摄像头与麦克风在线', error: `主机设备异常：${data.message || '请检查设备'}` };
+  hostCaptureState = data.state;
+  const labels = { offline: '主机离线 · 等待主机程序上线', idle: '主机在线 · 点击“启动现场摄像头”开启画面', starting: '主机正在开启两路摄像头…', capturing: '现场摄像头在线 · USB 主画面 + 笔记本画中画', error: `主机摄像头异常：${data.message || '请检查设备后重新启动'}` };
   $('host-status').textContent = labels[data.state] || '正在读取主机状态…';
-  if (data.cameras?.length) { sourceSizes.clear(); for (const camera of data.cameras) sourceSizes.set(camera.camera, camera); }
-  $('empty-state').textContent = data.state === 'offline' ? '主机已离线，等待重新连接…' : data.state === 'error' ? labels.error : '正在唤起主机，等待摄像头画面…';
+  $('empty-state').textContent = data.state === 'offline' ? '主机已离线，等待重新连接…' : data.state === 'error' ? labels.error : '连接后点击“启动现场摄像头”';
   renderMainView();
-  if (active) $('capture-info').textContent = data.cameras?.length ? data.cameras.map((c, i) => `摄像头 ${i + 1}：${c.width} × ${c.height}`).join(' · ') : labels[data.state];
+  if (active) $('capture-info').textContent = data.cameras?.length ? `${data.output?.width || 1280} × ${data.output?.height || 720} / ${data.output?.fps || 15} fps · USB ${data.cameras[0].width} × ${data.cameras[0].height} · 画中画 ${data.cameras[1]?.width || 0} × ${data.cameras[1]?.height || 0}` : labels[data.state];
+  renderCameraButton();
 }
 async function refreshStatus() { if (!accounts.current()) { $('host-status').textContent = '登录后查看主机状态'; return; } try { hostStatus(await api('host-status')); } catch {} }
 function connect() {
@@ -154,7 +160,7 @@ function leave() {
   if (document.fullscreenElement === mainStage) void document.exitFullscreen().catch(() => {});
   active = false; send({ type: 'leave' }); clearTimeout(reconnectTimer); clearInterval(statsTimer); const old = socket; socket = null; old?.close(); rtc.clear(); stopMedia(); ticket = null;
   audioMonitor.reset(); $('lobby-audio').append(audioMonitor.element);
-  for (const c of controllers.values()) c.dispose(); controllers.clear(); $('host-videos').replaceChildren(); $('host-thumbnails').replaceChildren(); $('remote-videos').replaceChildren(); $('remote-audio').replaceChildren(); sourceSizes.clear(); cameraChoice = null; document.body.classList.remove('meeting-active'); $('meeting').hidden = true; $('lobby').hidden = false; void refreshStatus();
+  for (const c of controllers.values()) c.dispose(); controllers.clear(); $('host-videos').replaceChildren(); $('remote-videos').replaceChildren(); $('remote-audio').replaceChildren(); sharedView = undefined; clearTimeout(cameraRequestTimer); document.body.classList.remove('meeting-active'); $('meeting').hidden = true; $('lobby').hidden = false; void refreshStatus();
   playback.reset(); renderFullscreen();
 }
 $('setup-form').onsubmit = async e => {

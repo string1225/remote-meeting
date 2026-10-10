@@ -25,7 +25,7 @@
 </section>
 <section id="camera-view" aria-label="摄像头视图" hidden>
   <div class="host-live-grid">
-    <section class="panel host-camera-panel" aria-labelledby="local-cameras-title"><div class="host-camera-heading"><h2 id="local-cameras-title">本机摄像头</h2><strong id="capture-status">待机 · 等待远端登录连接</strong></div><div id="sources" class="host-sources"></div><p id="sources-empty" class="empty-state">远端接入后自动开启本机摄像头</p></section>
+    <section class="panel host-camera-panel" aria-labelledby="local-cameras-title"><div class="host-camera-heading"><h2 id="local-cameras-title">本地合成画面</h2><strong id="capture-status">待机 · 等待远端登录连接</strong></div><div class="account-actions"><button id="local-camera-toggle" type="button" class="primary">启动摄像头</button></div><p id="virtual-camera-status" class="hint" role="status">系统虚拟摄像头已停止</p><div id="sources" class="host-sources"></div><p id="sources-empty" class="empty-state">远端连接后点击“启动现场摄像头”</p></section>
     <section class="panel host-camera-panel" aria-labelledby="remote-cameras-title"><div class="host-camera-heading"><h2 id="remote-cameras-title">远端参与者</h2><button id="play-audio" class="secondary">播放远端声音</button></div><div id="remote-media" class="video-grid"></div><p id="remote-empty" class="empty-state">等待远端接入</p><div id="remote-audio"></div></section>
   </div>
   <details class="host-connections"><summary>连接状态</summary><div id="participants"></div></details>

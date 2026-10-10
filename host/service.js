@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { WebSocket, WebSocketServer } from 'ws';
+import { createVirtualCamera } from './virtual-camera.js';
 
 const assets = new Map([['/', ['host/index.html', 'text/html']], ['/host-app.js', ['host/app.js', 'text/javascript']], ['/capture.js', ['host/capture.js', 'text/javascript']], ['/crop.js', ['host/crop.js', 'text/javascript']], ['/rtc.js', ['public/rtc.js', 'text/javascript']], ['/style.css', ['public/style.css', 'text/css']]]);
 assets.set('/host-accounts.js', ['host/accounts.js', 'text/javascript']);
@@ -8,14 +9,17 @@ assets.set('/audio-meter.js', ['public/audio-meter.js', 'text/javascript']);
 assets.set('/audio-meter.css', ['public/audio-meter.css', 'text/css']);
 assets.set('/playback-controls.js', ['public/playback-controls.js', 'text/javascript']);
 assets.set('/host.css', ['host/style.css', 'text/css']);
+assets.set('/composite.js', ['host/composite.js', 'text/javascript']);
+assets.set('/virtual-output.js', ['host/virtual-output.js', 'text/javascript']);
 export function createHostService(config) {
   const url = new URL('agent', config.serverUrl);
   if (!['https:', 'http:'].includes(url.protocol) || (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname))) throw new Error('Use an HTTPS cloud URL');
   if (typeof config.agentKey !== 'string' || config.agentKey.length < 32 || config.agentKey.startsWith('replace-')) throw new Error('Missing host agent key');
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  let renderer, cloud, reconnectTimer, attempt = 0, paused = false, stopping = false, localStatus = {};
+  let renderer, producer, cloud, reconnectTimer, attempt = 0, paused = false, stopping = false, localStatus = {}, virtualStatus = { state: 'stopped' };
   const send = (ws, data) => { if (ws?.readyState === WebSocket.OPEN) { if (ws.bufferedAmount > 256 * 1024) ws.close(1008, 'Slow consumer'); else ws.send(JSON.stringify(data)); } };
-  const status = () => ({ renderer: renderer?.readyState === WebSocket.OPEN, online: cloud?.readyState === WebSocket.OPEN, ...localStatus });
+  const virtual = createVirtualCamera(config.virtualCamera, message => { virtualStatus = message; send(producer, message); }, () => send(producer, { type: 'frame-ready' }));
+  const status = () => ({ renderer: renderer?.readyState === WebSocket.OPEN, online: cloud?.readyState === WebSocket.OPEN, ...localStatus, virtualCamera: virtualStatus });
   function json(res, status, data) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); }
   const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -68,13 +72,30 @@ export function createHostService(config) {
   }
   function disconnectCloud() { clearTimeout(reconnectTimer); const old = cloud; cloud = null; old?.terminate(); send(renderer, { type: 'cloud-status', online: false }); }
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  const videoSockets = new WebSocketServer({ noServer: true, maxPayload: 1920 * 1080 * 4, perMessageDeflate: false });
   server.on('upgrade', (req, socket, head) => {
-    if (req.url !== '/bridge' || req.headers.host !== `127.0.0.1:${server.address().port}` || req.headers.origin !== `http://127.0.0.1:${server.address().port}` || renderer) { socket.destroy(); return; }
+    if (req.headers.host !== `127.0.0.1:${server.address().port}` || req.headers.origin !== `http://127.0.0.1:${server.address().port}`) { socket.destroy(); return; }
+    if (req.url === '/virtual-camera' && !producer && renderer) { videoSockets.handleUpgrade(req, socket, head, ws => videoSockets.emit('connection', ws)); return; }
+    if (req.url !== '/bridge' || renderer) { socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws));
+  });
+  videoSockets.on('connection', ws => {
+    producer = ws; let started = false;
+    ws.on('error', () => {});
+    ws.on('message', (data, binary) => {
+      if (binary) { if (!virtual.frame(data)) ws.close(1008, 'Unexpected video frame'); return; }
+      try {
+        if (data.length > 2048) { ws.close(1008, 'Invalid video command'); return; }
+        const message = JSON.parse(data.toString());
+        if (started || message.type !== 'start') { ws.close(1008, 'Unexpected video command'); return; }
+        started = true; virtual.start(message.output);
+      } catch { ws.close(1008, 'Invalid video command'); }
+    });
+    ws.on('close', () => { if (producer === ws) { producer = null; virtual.stop(); } });
   });
   wss.on('connection', ws => {
     renderer = ws; paused = false;
-    send(ws, { type: 'config', config: { cameras: config.cameras || [], microphone: config.microphone || '', idleMs: config.idleMs ?? 3000 } });
+    send(ws, { type: 'config', config: { cameras: config.cameras || [], microphone: config.microphone || '', output: config.output || {}, virtualCamera: config.virtualCamera?.enabled !== false, idleMs: config.idleMs ?? 3000 } });
     connectCloud();
     ws.on('error', () => {});
     ws.on('message', raw => {
@@ -87,9 +108,9 @@ export function createHostService(config) {
         else if (['signal', 'host-state'].includes(message.type)) send(cloud, message);
       } catch { ws.close(1008, 'Invalid local message'); }
     });
-    ws.on('close', () => { if (renderer === ws) { renderer = null; localStatus = {}; disconnectCloud(); } });
+    ws.on('close', () => { if (renderer === ws) { renderer = null; localStatus = {}; producer?.terminate(); virtual.stop(); disconnectCloud(); } });
   });
-  server.shutdown = async () => { stopping = true; disconnectCloud(); renderer?.terminate(); wss.close(); await new Promise(resolve => server.close(resolve)); };
+  server.shutdown = async () => { stopping = true; disconnectCloud(); renderer?.terminate(); producer?.terminate(); virtual.stop(); videoSockets.close(); wss.close(); await new Promise(resolve => server.close(resolve)); };
   server.hostStatus = status;
   return server;
 }

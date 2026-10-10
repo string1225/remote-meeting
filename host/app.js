@@ -1,12 +1,15 @@
 import { MeetingRTC } from '/rtc.js';
-import { captureHost } from '/capture.js';
-import { createCrop } from '/crop.js';
+import { captureHost, captureMicrophone } from '/capture.js';
+import { createComposite, compositeSettings } from '/composite.js';
+import { createVirtualOutput } from '/virtual-output.js';
 import '/host-accounts.js';
 import { createAudioMonitor } from '/audio-meter.js';
 import { createPlaybackControls } from '/playback-controls.js';
 
 const $ = id => document.getElementById(id);
-let bridge, config = {}, capture, capturing, idleTimer, paused = false, chain = Promise.resolve();
+let bridge, config = {}, capture = null, capturing, session = null, creatingSession, acquiringAudio, idleTimer, paused = false, chain = Promise.resolve();
+let captureState = 'idle', captureMessage = '', captureGeneration = 0, sessionGeneration = 0;
+let cameraRequested = false, virtualState = { type: 'virtual-camera-state', state: 'stopped' };
 let hadPeers = false;
 function showView(cameras) {
   $('camera-view').hidden = !cameras; $('access-settings').hidden = cameras;
@@ -27,38 +30,90 @@ const audioMonitor = createAudioMonitor({ container: $('host-audio'), onError: e
 const playback = createPlaybackControls({ button: $('play-audio'), container: $('remote-audio'), activate: audioMonitor.activate, onError: error,
   retryVideos: () => { for (const video of $('remote-media').querySelectorAll('video')) void video.play().catch(() => {}); } });
 function state(value, message = '') {
+  captureState = value; captureMessage = message;
   const cameras = capture?.sources.map(s => ({ label: s.label, width: s.settings.width, height: s.settings.height, frameRate: s.settings.frameRate })) || [];
-  send({ type: 'host-state', state: value, cameras, message });
-  $('capture-status').textContent = ({ idle: '待机 · 摄像头和麦克风已关闭', starting: '正在开启主机摄像头和麦克风…', capturing: '采集中 · 两路摄像头和麦克风已开启', error: '设备开启失败' })[value];
-  $('sources-empty').hidden = !!capture;
-  $('sources-empty').textContent = value === 'starting' ? '正在开启本机摄像头…' : value === 'error' ? '设备开启失败，请检查摄像头连接与权限' : '远端接入后自动开启本机摄像头';
+  send({ type: 'host-state', state: value, cameras, output: session?.composite.settings || compositeSettings(config.output), message });
+  $('capture-status').textContent = ({ idle: session?.audio ? '摄像头已停止 · 麦克风在线' : '待机 · 设备已关闭', starting: '正在开启两路摄像头…', capturing: '采集中 · USB 主画面 + 笔记本画中画', error: '摄像头开启失败' })[value];
+  $('local-camera-toggle').textContent = value === 'starting' ? '取消启动' : capture ? '停止摄像头' : '启动摄像头';
+  $('local-camera-toggle').disabled = paused;
+  $('sources-empty').hidden = !!session;
+  $('sources-empty').textContent = '远端连接后点击“启动现场摄像头”';
+  broadcastControl({ type: 'camera-state', state: value, message });
   report();
+}
+function broadcastControl(message) { for (const peer of rtc.peers.values()) rtc.control(peer.info.id, message); }
+function virtualStatus(message) {
+  virtualState = message;
+  $('virtual-camera-status').textContent = message.state === 'ready' ? '系统摄像头：OBS Virtual Camera · 已输出' : message.state === 'error' ? `系统摄像头输出失败：${message.message}` : message.state === 'starting' ? '系统虚拟摄像头正在启动…' : message.state === 'disabled' ? '系统虚拟摄像头输出已禁用' : '系统虚拟摄像头已停止';
+  broadcastControl(message);
+}
+async function ensureSession(withAudio = true) {
+  clearTimeout(idleTimer);
+  if (!session && !creatingSession) creatingSession = Promise.resolve().then(() => {
+    const composite = createComposite(config.output);
+    session = { composite, audio: null };
+    const item = document.createElement('div'), label = document.createElement('p'); item.className = 'video-card'; label.className = 'caption';
+    label.textContent = `共享合成画面 · ${composite.settings.width} × ${composite.settings.height} / ${composite.settings.fps} fps`;
+    item.append(composite.canvas, label); $('sources').replaceChildren(item);
+    state(captureState, captureMessage); return session;
+  }).finally(() => { creatingSession = null; scheduleIdle(); });
+  const owner = session || await creatingSession;
+  if (withAudio && !owner.audio) {
+    if (!acquiringAudio || acquiringAudio.owner !== owner) {
+      const generation = sessionGeneration;
+      audioMonitor.stopPreview(); void audioMonitor.activate();
+      const request = { owner }; acquiringAudio = request;
+      request.promise = captureMicrophone(config).then(audio => {
+        if (generation !== sessionGeneration || owner !== session || paused) { audio.getTracks().forEach(t => t.stop()); throw new Error('接入已结束'); }
+        owner.audio = audio; audioMonitor.setMicrophone(audio);
+        audio.getTracks().forEach(track => { track.onended = () => { error('麦克风已断开，请检查设备。'); rtc.clear(); stopSession(); send({ type: 'bridge-reconnect' }); }; });
+        return audio;
+      }).finally(() => { if (acquiringAudio === request) acquiringAudio = null; scheduleIdle(); });
+    }
+    await acquiringAudio.promise;
+  }
+  return owner;
 }
 async function ensureCapture() {
   clearTimeout(idleTimer);
   if (capture) return capture;
-  if (capturing) return capturing;
+  if (capturing) {
+    if (cameraRequested) return capturing;
+    const generation = captureGeneration; cameraRequested = true; state('starting');
+    return capturing.then(() => { if (generation === captureGeneration && cameraRequested) return ensureCapture(); });
+  }
+  const generation = captureGeneration;
+  if (paused) return;
+  cameraRequested = true;
   showView(true); state('starting'); error('');
-  audioMonitor.stopPreview(); void audioMonitor.activate();
-  capturing = captureHost(config).then(result => {
+  capturing = (async () => {
+    const owner = await ensureSession(false);
+    const result = await captureHost({ ...config, output: owner.composite.settings });
+    if (generation !== captureGeneration || owner !== session || paused || !cameraRequested) { result.stop(); return; }
     capture = result;
-    audioMonitor.setMicrophone(capture.audio);
-    $('sources').replaceChildren(...capture.sources.map((s, i) => {
-      const item = document.createElement('div'), label = document.createElement('p'); item.className = 'video-card'; label.className = 'caption';
-      label.textContent = `摄像头 ${i + 1} · ${s.label} · ${s.settings.width} × ${s.settings.height} / ${Math.round(s.settings.frameRate)} fps`;
-      item.append(s.video, label); return item;
-    }));
-    for (const stream of [...capture.sources.map(s => s.stream), capture.audio]) for (const track of stream.getTracks()) track.onended = () => {
-      error('采集设备已断开，正在重新初始化。'); rtc.clear(); stopCapture(); send({ type: 'bridge-reconnect' });
+    owner.composite.setSources(capture.sources);
+    for (const s of capture.sources) for (const track of s.stream.getTracks()) track.onended = () => {
+      stopCapture(); error('摄像头已断开，请检查连接后重新启动。'); state('error', '摄像头已断开');
     };
+    owner.virtualOutput = createVirtualOutput(owner.composite, config.virtualCamera, virtualStatus);
+    broadcastControl({ type: 'viewport-applied', ...owner.composite.snapshot(), shared: true });
     state('capturing'); return capture;
-  }).catch(e => { state('error', e.message); error(e.message); throw e; }).finally(() => { capturing = null; });
+  })().catch(e => { if (generation === captureGeneration) { cameraRequested = false; state('error', e.message); error(e.message); } }).finally(() => { capturing = null; scheduleIdle(); });
   return capturing;
 }
-function stopCapture() { clearTimeout(idleTimer); audioMonitor.setMicrophone(null); capture?.stop(); capture = null; $('sources').replaceChildren(); state('idle'); }
+function stopCapture(release = true) { cameraRequested = false; captureGeneration++; session?.virtualOutput?.dispose(); if (session) session.virtualOutput = null; virtualStatus({ type: 'virtual-camera-state', state: 'stopped' }); capture?.stop(); capture = null; session?.composite.setSources(); state('idle'); if (release) scheduleIdle(); }
+function stopSession() {
+  clearTimeout(idleTimer); sessionGeneration++; stopCapture(false); audioMonitor.setMicrophone(null);
+  session?.audio?.getTracks().forEach(t => t.stop()); session?.composite.dispose(); session = null;
+  $('sources').replaceChildren(); state('idle');
+}
 function scheduleIdle() {
   clearTimeout(idleTimer);
-  if (!rtc.peers.size) idleTimer = setTimeout(() => { if (!rtc.peers.size && !capturing) stopCapture(); }, config.idleMs ?? 3000);
+  if (!rtc.peers.size && !rtc.pending.size) idleTimer = setTimeout(() => {
+    if (rtc.peers.size || rtc.pending.size) return;
+    if (cameraRequested) { audioMonitor.setMicrophone(null); session?.audio?.getTracks().forEach(t => t.stop()); if (session) session.audio = null; state(captureState, captureMessage); }
+    else stopSession();
+  }, config.idleMs ?? 3000);
 }
 function renderParticipants() {
   const hasPeers = rtc.peers.size > 0;
@@ -76,11 +131,15 @@ function renderRemoteEmpty() {
   $('remote-empty').textContent = rtc.peers.size ? '远端已接入 · 等待画面，对方也可能未开启摄像头' : '等待远端接入';
 }
 function report() {
-  send({ type: 'local-status', capturing: !!capture, paused, cameras: capture?.sources.map(s => ({ label: s.label, ...s.settings, deviceId: undefined, groupId: undefined })) || [], peers: [...(rtc?.peers?.values() || [])].map(p => ({ name: p.info.name, state: p.pc.connectionState, views: p.media.filter(m => m.kind === 'video').map(m => ({ camera: m.camera, ...m.view, width: m.canvas.width, height: m.canvas.height })) })) });
+  send({ type: 'local-status', capturing: !!capture, microphone: !!session?.audio, paused, output: session?.composite.settings, cameras: capture?.sources.map(s => ({ label: s.label, ...s.settings, deviceId: undefined, groupId: undefined })) || [], peers: [...rtc.peers.values()].map(p => ({ name: p.info.name, state: p.pc.connectionState, views: session ? [{ camera: 0, ...session.composite.view, ...session.composite.settings }] : [] })) });
 }
 const rtc = new MeetingRTC({
   send,
-  async getMedia() { const source = await ensureCapture(); return [...source.sources.map((s, i) => createCrop(s, i)), { kind: 'audio', label: '现场麦克风', stream: source.audio }]; },
+  async getMedia() {
+    const source = await ensureSession();
+    // Shared tracks belong to the session; disconnecting one peer must not stop them.
+    return [{ kind: 'video', camera: 0, label: source.composite.label, stream: source.composite.stream }, { kind: 'audio', label: '现场麦克风', stream: source.audio }];
+  },
   onTrack(peer, stream) {
     const container = stream.getVideoTracks().length ? $('remote-media') : $('remote-audio');
     if ([...container.children].some(e => e.dataset.stream === stream.id)) return;
@@ -96,12 +155,21 @@ const rtc = new MeetingRTC({
   },
   onPeer: renderParticipants,
   onRemove(peer) { audioMonitor.removeRemote(peer.info.id); for (const el of document.querySelectorAll('[data-owner]')) if (el.dataset.owner === peer.info.id) { const media = el.querySelector('video,audio'); if (media) media.srcObject = null; el.remove(); } playback.refresh(); renderParticipants(); scheduleIdle(); },
+  onControlOpen(peer) {
+    rtc.control(peer.info.id, { type: 'camera-state', state: captureState, message: captureMessage });
+    rtc.control(peer.info.id, virtualState);
+    if (session) rtc.control(peer.info.id, { type: 'viewport-applied', ...session.composite.snapshot(), shared: true });
+  },
   onControl(peer, message) {
-    if (message?.type !== 'viewport' || ![0, 1].includes(message.camera)) return;
-    const crop = peer.media.find(m => m.camera === message.camera);
-    if (!crop) return;
-    const view = crop.setView(message);
-    rtc.control(peer.info.id, { type: 'viewport-applied', ...view }); report();
+    if (message?.type === 'camera-start' || message?.type === 'camera-stop') {
+      if (paused || rtc.peers.get(peer.info.id) !== peer) return;
+      if (message.type === 'camera-start') void ensureCapture().then(() => state(captureState, captureMessage));
+      else stopCapture();
+      return;
+    }
+    if (message?.type !== 'viewport' || message.camera !== 0 || !capture || !session) return;
+    const view = session.composite.setView(message);
+    broadcastControl({ type: 'viewport-applied', ...view, shared: true }); report();
   },
   onError(e) { error(e.message); }
 });
@@ -111,7 +179,7 @@ async function handle(message) {
   if (message.type === 'joined') {
     rtc.configure(message.self, message.iceServers);
     for (const peer of message.peers) await rtc.add(peer, true);
-    state(capture ? 'capturing' : 'idle'); renderParticipants();
+    state(captureState, captureMessage); renderParticipants();
   } else if (message.type === 'peer-joined') await rtc.add(message.peer);
   else if (message.type === 'peer-left') rtc.remove(message.id);
   else if (message.type === 'signal') rtc.signal(message.from, message.data);
@@ -120,16 +188,17 @@ async function handle(message) {
 function connect() {
   bridge = new WebSocket(`ws://${location.host}/bridge`);
   bridge.onmessage = event => { chain = chain.then(() => handle(JSON.parse(event.data))).catch(e => { error(e.message); scheduleIdle(); }); };
-  bridge.onclose = () => { rtc.clear(); stopCapture(); $('connection').textContent = '本机服务断开，正在恢复…'; setTimeout(connect, 1500); };
+  bridge.onclose = () => { rtc.clear(); stopSession(); $('connection').textContent = '本机服务断开，正在恢复…'; setTimeout(connect, 1500); };
   bridge.onerror = () => {};
 }
 $('pause').onclick = async () => {
   paused = !paused;
-  if (paused) { send({ type: 'bridge-pause' }); rtc.clear(); if (capturing) await capturing.catch(() => {}); stopCapture(); }
+  if (paused) { send({ type: 'bridge-pause' }); rtc.clear(); stopSession(); }
   else send({ type: 'bridge-resume' });
   $('pause').textContent = paused ? '恢复远端接入' : '暂停远端接入';
 };
+$('local-camera-toggle').onclick = () => { if (cameraRequested || capture) stopCapture(); else void ensureCapture(); };
 setInterval(() => { void rtc.stats(); report(); }, 3000);
-window.hostDiagnostics = () => ({ capture, peers: rtc.peers });
+window.hostDiagnostics = () => ({ capture, session, peers: rtc.peers });
 connect();
 window.addEventListener('pagehide', () => audioMonitor.dispose());

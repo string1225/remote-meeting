@@ -1,12 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cropRect, normalizeView, outputSize } from '../host/crop.js';
-
-test('output is capped at 1080p and preserves a 720p source output without upscaling', () => {
-  assert.deepEqual(outputSize(8160, 6120), { width: 1920, height: 1080 });
-  assert.deepEqual(outputSize(3840, 2160), { width: 1920, height: 1080 });
-  assert.deepEqual(outputSize(1280, 720), { width: 1280, height: 720 });
-});
+import { cropRect, normalizeView } from '../host/crop.js';
 
 test('crop geometry selects only the requested high-resolution region and clamps edges', () => {
   assert.deepEqual(cropRect(3840, 2160, { zoom: 2, x: 0.25, y: 0.5 }), { x: 0, y: 540, width: 1920, height: 1080 });

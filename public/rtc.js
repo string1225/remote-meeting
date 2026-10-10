@@ -53,7 +53,7 @@ export class MeetingRTC {
       }, pc.connectionState === 'failed' ? 1000 : 5000);
     };
     for (const item of media) for (const track of item.stream.getTracks()) pc.addTrack(track, item.stream);
-    if (!media.length) { pc.addTransceiver('audio', { direction: 'recvonly' }); pc.addTransceiver('video', { direction: 'recvonly' }); pc.addTransceiver('video', { direction: 'recvonly' }); }
+    if (!media.length) { pc.addTransceiver('audio', { direction: 'recvonly' }); pc.addTransceiver('video', { direction: 'recvonly' }); }
     this.onPeer?.(peer);
   }
   signal(id, data) {
@@ -89,7 +89,7 @@ export class MeetingRTC {
       const params = sender.getParameters();
       if (!params.encodings?.length) continue;
       const height = sender.track.getSettings().height || 1080;
-      for (const e of params.encodings) { e.maxBitrate = sender.track.kind === 'video' ? (height <= 720 ? 1_600_000 : 3_000_000) : 64_000; if (sender.track.kind === 'video') e.maxFramerate = 24; }
+      for (const e of params.encodings) { e.maxBitrate = sender.track.kind === 'video' ? (height <= 720 ? 1_600_000 : 3_000_000) : 64_000; if (sender.track.kind === 'video') e.maxFramerate = Math.min(24, sender.track.getSettings().frameRate || 24); }
       try { await sender.setParameters(params); } catch { /* Browser-specific encoder limits. */ }
     }
   }
