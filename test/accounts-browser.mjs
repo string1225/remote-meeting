@@ -47,8 +47,6 @@ try {
   await host.locator('#signed-in').waitFor();
   assert.equal(await host.locator('#manage-users').isVisible(), false);
   await host.reload(); await host.locator('#signed-in').waitFor();
-  await host.locator('#mode').selectOption('listen');
-  await host.locator('#join-button').click();
   await host.waitForFunction(() => document.querySelector('#signal-status').textContent.includes('在线'));
   await row.locator('[data-action=reset]').click();
   await admin.locator('#reset-password').fill(newPassword);

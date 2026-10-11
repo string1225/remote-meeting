@@ -4,12 +4,13 @@ import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { createHostService } from '../host/service.js';
 import { createMeetingServer } from '../server/app.js';
+import { createFakeCamera } from './fake-camera.js';
 
 const agentKey = 'browser-account-test-machine-key-32-characters';
 const cloud = createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: 'test-admin-key', USERS_FILE: ':memory:', HOST_AGENT_KEY: agentKey, ALLOWED_ORIGINS: '', STUN_URLS: '' });
 cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening');
 const cloudUrl = `http://127.0.0.1:${cloud.address().port}/`;
-const local = createHostService({ serverUrl: cloudUrl, agentKey }); local.listen(0, '127.0.0.1'); await once(local, 'listening');
+const local = createHostService({ serverUrl: cloudUrl, agentKey }, { cameraFactory: createFakeCamera }); local.listen(0, '127.0.0.1'); await once(local, 'listening');
 const browser = await chromium.launch({ ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true });
 const host = await browser.newPage({ viewport: { width: 1280, height: 1000 } }), remote = await browser.newPage();
 const errors = []; for (const page of [host, remote]) page.on('pageerror', error => errors.push(error.message));

@@ -5,9 +5,7 @@
   "nodePath": "C:\\Program Files\\nodejs\\node.exe",
   "browserPath": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
   "cameras": [],
-  "microphone": "",
   "output": { "width": 1920, "fps": 30 },
   "virtualCamera": { "enabled": true },
-  "idleMs": 3000,
   "headless": false
 }

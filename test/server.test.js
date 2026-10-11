@@ -43,7 +43,7 @@ test('password authentication, no anonymous admission, host machine key and orig
   assert.equal((await f.request('rooms', 'POST', undefined, cookie)).status, 410);
 });
 
-test('one persistent host, two authenticated remotes, isolated tickets and allowlisted signals', async t => {
+test('two authenticated control panels, isolated tickets and validated camera commands', async t => {
   const f = await fixture(t); const host = await f.client({ agent: true }); const hj = await host.next('joined');
   const aCookie = cookieOf(await f.login()), bCookie = cookieOf(await f.login()), cCookie = cookieOf(await f.login());
   const a = await (await f.reserve(aCookie)).json(), b = await (await f.reserve(bCookie)).json();
@@ -53,17 +53,18 @@ test('one persistent host, two authenticated remotes, isolated tickets and allow
   assert.equal(aj.peers.length, 1); assert.equal(aj.peers[0].role, 'host'); assert.equal(JSON.stringify(aj).includes(agentKey), false);
   const br = await f.client({ cookie: bCookie, ticket: b.ticket }); const bj = await br.next('joined'); assert.equal(bj.peers.length, 2);
   const duplicate = await f.client({ cookie: aCookie, ticket: a.ticket }); assert.equal((await duplicate.next('error')).code, 'FULL');
-  ar.send({ type: 'signal', to: hj.self.id, data: { media: 'base64-video' } });
-  ar.send({ type: 'signal', to: hj.self.id, data: { description: { type: 'offer', sdp: 'v=0' }, streams: [{ id: 'remote', kind: 'video', camera: 0 }] } });
-  const signal = await host.next('signal'); assert.equal(signal.from, aj.self.id); assert.equal(signal.data.streams[0].camera, undefined);
+  ar.send({ type: 'control', data: { type: 'viewport', camera: 0, zoom: 2, x: 0, y: 1, media: 'ignored' } });
+  const command = await host.next('control'); assert.equal(command.from, aj.self.id);
+  assert.deepEqual(command.data, { type: 'viewport', camera: 0, zoom: 2, x: 0.25, y: 0.75 });
+  assert.equal(aj.iceServers, undefined);
   host.send({ type: 'host-state', state: 'capturing', cameras: [{ width: 3840, height: 2160, label: 'Camera 1' }] });
   assert.equal((await ar.next('host-state')).cameras[0].width, 3840);
   ar.send({ type: 'host-state', state: 'error', message: 'spoofed' });
   assert.equal((await (await f.request('host-status', 'GET', undefined, aCookie)).json()).state, 'capturing');
   ar.send({ type: 'leave' }); await host.next('peer-left');
   assert.equal((await f.reserve(cCookie)).status, 201);
-  br.send({ type: 'signal', to: hj.self.id, data: { candidate: { candidate: 'candidate:test', sdpMid: '0', sdpMLineIndex: 0 } } });
-  assert.equal((await host.next('signal')).from, bj.self.id);
+  br.send({ type: 'control', data: { type: 'camera-stop', media: 'ignored' } });
+  const stop = await host.next('control'); assert.equal(stop.from, bj.self.id); assert.deepEqual(stop.data, { type: 'camera-stop' });
 });
 
 test('remote reconnect and host reconnect keep the persistent access model', async t => {
@@ -99,16 +100,29 @@ test('account roles and password reset disconnect only that user, preserving the
   assert.equal((await f.reserve(fresh)).status, 401);
   assert.equal((await f.login('operator', '987654')).status, 401);
   assert.equal((await f.request(`users/${user.id}`, 'DELETE', undefined, admin)).status, 200);
-  b.send({ type: 'signal', to: hj.self.id, data: { description: { type: 'offer', sdp: 'v=0' } } }); assert.equal((await host.next('signal')).from, bj.self.id);
+  b.send({ type: 'control', data: { type: 'camera-start' } }); assert.equal((await host.next('control')).from, bj.self.id);
   await f.request('logout', 'POST', undefined, admin); await b.next('ended'); assert.equal((await f.reserve(admin)).status, 401);
 });
 
-test('login throttle, secure scoped cookie and temporary external TURN credentials', async t => {
+test('login throttle and secure scoped cookie; control protocol publishes no ICE/TURN credentials', async t => {
   const f = await fixture(t, { TRUST_PROXY: 'true', COOKIE_PATH: '/meeting/', TURN_URLS: 'turn:example.com:3478', TURN_SECRET: 'test-turn-secret' });
   const response = await fetch(`${f.url}/api/login`, { method: 'POST', headers: { Origin: f.url, 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https' }, body: JSON.stringify({ username: 'admin', password }) });
   assert.match(response.headers.get('set-cookie'), /Path=\/meeting\/; HttpOnly; SameSite=Strict; Max-Age=28800; Secure/);
-  const host = await f.client({ agent: true }); const joined = await host.next('joined'); const turn = joined.iceServers.find(s => s.username);
-  assert.ok(Number(turn.username.split(':')[0]) > Date.now() / 1000); assert.equal(JSON.stringify(joined).includes('test-turn-secret'), false);
+  const host = await f.client({ agent: true }); const joined = await host.next('joined');
+  assert.equal(joined.iceServers, undefined); assert.equal(JSON.stringify(joined).includes('test-turn-secret'), false);
   for (let i = 0; i < 10; i++) assert.equal((await f.login('admin', 'wrong')).status, 401);
   assert.equal((await f.login()).status, 429);
+});
+
+test('web media permissions and legacy WebRTC routes are disabled; SDP is never relayed', async t => {
+  const f = await fixture(t), host = await f.client({ agent: true }); await host.next('joined');
+  const response = await fetch(f.url);
+  assert.equal(response.headers.get('permissions-policy'), 'camera=(), microphone=()');
+  assert.match(response.headers.get('content-security-policy'), /media-src 'none'/);
+  for (const path of ['rtc.js', 'audio-meter.js', 'playback-controls.js']) assert.equal((await fetch(f.url + '/' + path)).status, 404);
+  const cookie = cookieOf(await f.login()), { ticket } = await (await f.reserve(cookie)).json();
+  const remote = await f.client({ cookie, ticket }); await remote.next('joined');
+  remote.send({ type: 'signal', data: { description: { type: 'offer', sdp: 'v=0' } } });
+  assert.equal((await remote.next('error')).code, 'CONTROLS_ONLY');
+  assert.equal(host.inbox.some(m => m.type === 'signal'), false);
 });

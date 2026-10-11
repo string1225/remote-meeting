@@ -9,13 +9,14 @@ import { WebSocket } from 'ws';
 import { createHostService } from '../host/service.js';
 import { createMeetingServer } from '../server/app.js';
 import { createUserStore } from '../server/users.js';
+import { createFakeCamera } from './fake-camera.js';
 
 const agentKey = 'local-account-test-machine-key-at-least-32-chars';
 async function fixture(t, file = ':memory:') {
   const cloud = createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: 'admin-password', USERS_FILE: file, HOST_AGENT_KEY: agentKey, ALLOWED_ORIGINS: '', STUN_URLS: '' });
   cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening');
   const cloudUrl = `http://127.0.0.1:${cloud.address().port}`;
-  const host = createHostService({ serverUrl: cloudUrl + '/', agentKey });
+  const host = createHostService({ serverUrl: cloudUrl + '/', agentKey }, { cameraFactory: createFakeCamera });
   host.listen(0, '127.0.0.1'); await once(host, 'listening');
   const localUrl = `http://127.0.0.1:${host.address().port}`;
   t.after(async () => { await host.shutdown(); await cloud.shutdown(); });
@@ -27,7 +28,7 @@ async function fixture(t, file = ':memory:') {
   });
   const login = (username, password) => remote('login', 'POST', { username, password });
   const session = cookie => remote('session', 'GET', undefined, cookie).then(r => r.json());
-  return { cloudUrl, localUrl, request, remote, login, session };
+  return { cloudUrl, localUrl, request, remote, login, session, local: host };
 }
 const cookieOf = response => response.headers.get('set-cookie').split(';')[0];
 async function socket(url, options, ticket) {
@@ -77,7 +78,7 @@ test('host edits persist; renamed accounts and rotated keys revoke only the affe
     const response = await f.request('', 'POST', { username, displayName, password }); assert.equal(response.status, 201); return (await response.json()).user;
   };
   const a = await create('alice', '张三', 'alice-key'), b = await create('bob', '李四', 'bob-key');
-  const host = await socket(f.cloudUrl.replace('http:', 'ws:') + '/agent', { headers: { Authorization: `Bearer ${agentKey}` } });
+  const host = f.local;
   const aCookie = cookieOf(await f.login('alice', 'alice-key')), bCookie = cookieOf(await f.login('bob', 'bob-key'));
   async function connect(cookie) {
     const response = await f.remote('connect', 'POST', undefined, cookie); assert.equal(response.status, 201);
@@ -93,7 +94,7 @@ test('host edits persist; renamed accounts and rotated keys revoke only the affe
   assert.ok(ar.messages.some(m => m.type === 'ended'));
   assert.equal((await f.session(aCookie)).user, null);
   assert.equal((await f.session(bCookie)).user.id, b.id);
-  assert.equal(br.ws.readyState, WebSocket.OPEN); assert.equal(host.ws.readyState, WebSocket.OPEN);
+  assert.equal(br.ws.readyState, WebSocket.OPEN); assert.equal(host.hostStatus().online, true);
   assert.equal((await f.login('alice', 'alice-key')).status, 401);
   const renamed = await f.login('alice.new', 'alice-key'); assert.equal(renamed.status, 200);
   assert.equal((await renamed.json()).user.displayName, '张老师');

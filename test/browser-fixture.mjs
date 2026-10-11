@@ -2,90 +2,61 @@ import { once } from 'node:events';
 import { chromium } from 'playwright';
 import { createMeetingServer } from '../server/app.js';
 import { createHostService } from '../host/service.js';
-
+import { createFakeCamera } from './fake-camera.js';
 export const launchOptions = { ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true };
 function pollState(page) {
-  // State checks span several background pages. Avoid depending on each
-  // page's animation-frame cadence while all endpoints share one machine.
   const wait = page.waitForFunction.bind(page);
   page.waitForFunction = (expression, arg, options = {}) => wait(expression, arg, { polling: 100, ...options });
   return page;
 }
-export async function instrument(context, syntheticHost = false, syntheticAudio = false) {
-  const syntheticFps = Math.max(1, Math.min(30, Number(process.env.E2E_CAPTURE_FPS) || 30));
-  await context.addInitScript(({ syntheticHost, syntheticAudio, syntheticFps }) => {
-    window.testPeers = []; window.testSockets = []; window.testTracks = []; window.testMediaRequests = [];
-    const PC = RTCPeerConnection, WS = WebSocket;
-    window.RTCPeerConnection = class extends PC { constructor(...a) { super(...a); window.testPeers.push(this); } };
-    window.WebSocket = class extends WS { constructor(...a) { super(...a); window.testSockets.push(this); } };
-    const native = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-    const enumerate = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
-    if (syntheticHost) {
-      const capture = HTMLCanvasElement.prototype.captureStream;
-      HTMLCanvasElement.prototype.captureStream = function(fps) { return capture.call(this, Math.min(fps ?? syntheticFps, syntheticFps)); };
-      const interval = window.setInterval;
-      // Match the synthetic drawing cadence to its capture rate, so reduced
-      // FPS also reduces canvas work on machines running all three endpoints.
-      window.setInterval = (callback, delay, ...args) => interval(callback, delay > 0 && delay <= 1000 / 24 ? Math.max(delay, 1000 / syntheticFps) : delay, ...args);
-    }
-    if (syntheticHost) navigator.mediaDevices.enumerateDevices = async () => [...(await enumerate()).filter(d => d.kind !== 'videoinput'), ...[1, 2].map(i => ({ kind: 'videoinput', deviceId: `test-camera-${i}`, label: `Synthetic 4K camera ${i}`, groupId: `${i}` }))];
-    navigator.mediaDevices.getUserMedia = async c => {
-      window.testMediaRequests.push(c);
-      let stream;
-      if (syntheticHost && c.video?.deviceId?.exact?.startsWith('test-camera-')) {
-        const camera = c.video.deviceId.exact.endsWith('2') ? 1 : 0;
-        if (camera && window.testCameraFailure) throw new DOMException('测试摄像头被占用', 'NotReadableError');
-        if (window.testCameraDelay) await window.testCameraDelay;
-        const canvas = document.createElement('canvas'); canvas.width = Math.min(3840, c.video.width?.max || 3840); canvas.height = canvas.width * 9 / 16;
-        const ctx = canvas.getContext('2d'); ctx.fillStyle = camera ? '#14bf40' : '#e81919'; ctx.fillRect(0, 0, canvas.width / 2, canvas.height); ctx.fillStyle = camera ? '#e8ca16' : '#183be8'; ctx.fillRect(canvas.width / 2, 0, canvas.width / 2, canvas.height);
-        let counter = 0; const timer = setInterval(() => { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 420, 100); ctx.fillStyle = '#000'; ctx.font = '40px sans-serif'; ctx.fillText(`Frame ${counter++}`, 15, 60); }, 120);
-        stream = canvas.captureStream(30);
-        const track = stream.getVideoTracks()[0], stop = track.stop.bind(track); track.stop = () => { clearInterval(timer); stop(); };
-      } else if (syntheticAudio && c.audio && !c.video) {
-        // Continuous, deterministic input avoids fake-device silence intervals
-        // and acoustic echo cancellation influencing audio-level assertions.
-        const audio = new AudioContext(), oscillator = audio.createOscillator(), gain = audio.createGain(), destination = audio.createMediaStreamDestination();
-        oscillator.frequency.value = 330; gain.gain.value = 0.1; oscillator.connect(gain); gain.connect(destination); oscillator.start(); await audio.resume();
-        stream = destination.stream;
-        const track = stream.getAudioTracks()[0], stop = track.stop.bind(track); let stopped = false;
-        track.stop = () => { if (stopped) return; stopped = true; oscillator.stop(); oscillator.disconnect(); gain.disconnect(); void audio.close(); stop(); };
-      } else stream = await native(c);
-      window.testTracks.push(...stream.getTracks()); return stream;
+export async function instrument(context) {
+  await context.addInitScript(() => {
+    window.testMediaRequests = []; window.testPeers = []; window.testSockets = []; window.testMessages = [];
+    if (navigator.mediaDevices) for (const method of ['getUserMedia', 'enumerateDevices']) navigator.mediaDevices[method] = async (...args) => { window.testMediaRequests.push({ method, args }); throw new Error('Web media APIs must never be called'); };
+    window.RTCPeerConnection = class { constructor() { window.testPeers.push(true); throw new Error('WebRTC must never be created'); } };
+    const WS = WebSocket;
+    window.WebSocket = class extends WS {
+      constructor(...args) { super(...args); window.testSockets.push(this); this.addEventListener('message', event => window.testMessages.push(event.data)); }
+      send(data) { window.testMessages.push(data); return super.send(data); }
     };
-  }, { syntheticHost, syntheticAudio, syntheticFps });
+  });
 }
-export async function localStack({ hardware = false, virtualCamera = { enabled: false } } = {}) {
+export async function localStack({ hardware = false, native = false, virtualCamera = {} } = {}) {
   const password = '12345678', agentKey = 'test-host-machine-key-32-characters-only';
-  const cloud = createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: password, HOST_AGENT_KEY: agentKey, USERS_FILE: ':memory:', ALLOWED_ORIGINS: '', STUN_URLS: '' });
+  const cloud = createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: password, HOST_AGENT_KEY: agentKey, USERS_FILE: ':memory:', ALLOWED_ORIGINS: '' });
   cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening');
-  const url = `http://127.0.0.1:${cloud.address().port}/`;
-  const local = createHostService({ serverUrl: url, agentKey, virtualCamera, idleMs: 200 }); local.listen(0, '127.0.0.1'); await once(local, 'listening');
-  const hostBrowser = await chromium.launch({ ...launchOptions, args: ['--use-fake-ui-for-media-stream', ...(!hardware ? ['--use-fake-device-for-media-stream'] : []), '--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'] });
-  const context = await hostBrowser.newContext({ permissions: ['camera', 'microphone'], viewport: { width: 1280, height: 900 } });
-  await instrument(context, !hardware, !hardware);
-  const host = pollState(await context.newPage());
-  const errors = []; host.on('pageerror', e => errors.push(`host: ${e.message}`));
-  await host.goto(`http://127.0.0.1:${local.address().port}/`);
+  const url = 'http://127.0.0.1:' + cloud.address().port + '/';
+  let fake;
+  const local = createHostService({ serverUrl: url, agentKey, virtualCamera: { ...virtualCamera, synthetic: native && !hardware } },
+    hardware || native ? {} : { cameraFactory: (config, publish) => { fake = createFakeCamera(config, publish); return fake; } });
+  local.listen(0, '127.0.0.1'); await once(local, 'listening');
+  const hostBrowser = await chromium.launch(launchOptions);
+  const context = await hostBrowser.newContext({ viewport: { width: 1280, height: 900 } }); await instrument(context);
+  const host = pollState(await context.newPage()), errors = [];
+  host.on('pageerror', e => errors.push('host: ' + e.message));
+  await host.goto('http://127.0.0.1:' + local.address().port + '/');
   await host.waitForFunction(() => document.querySelector('#connection').textContent.includes('在线'));
-  return { url, password, host, local, errors, async close() { await hostBrowser.close(); await local.shutdown(); await cloud.shutdown(); } };
+  return { url, password, host, hostBrowser, local, errors, camera: fake, async close() { await hostBrowser.close(); await local.shutdown(); await cloud.shutdown(); } };
 }
 export async function remotePage(browser, errors) {
-  const context = await browser.newContext({ permissions: ['camera', 'microphone'], viewport: { width: 1440, height: 1000 } });
-  await instrument(context, false, true);
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await instrument(context);
   const page = pollState(await context.newPage()); page.on('pageerror', e => errors.push(e.message)); return page;
 }
-export async function connectRemote(page, url, password, username = 'admin', mode = 'video') {
-  await page.goto(url); await page.locator('#username').fill(username); await page.locator('#admin-key').fill(password); await page.locator('#mode').selectOption(mode); await page.locator('#join-button').click();
+export async function connectRemote(page, url, password, username = 'admin') {
+  await page.goto(url); await page.locator('#username').fill(username); await page.locator('#admin-key').fill(password); await page.locator('#login').click();
   await page.waitForFunction(() => document.querySelector('#signal-status').textContent.includes('在线'));
 }
 export async function setView(page, camera, zoom, x) {
-  const panel = page.locator(`.crop-controls[data-camera="${camera}"]`);
+  const panel = page.locator('.crop-controls[data-camera="' + camera + '"]');
   await panel.locator('input').fill(String(zoom));
-  const map = panel.locator('.crop-map'); const box = await map.boundingBox();
+  const map = panel.locator('.crop-map'), box = await map.boundingBox();
   await map.click({ position: { x: box.width * x, y: box.height * 0.5 } });
-  await page.waitForFunction(({ camera, zoom }) => document.querySelector(`.crop-controls[data-camera="${camera}"] .crop-status`)?.textContent.includes(`${zoom.toFixed(1)}×`), { camera, zoom });
+  await page.waitForFunction(({ zoom }) => document.querySelector('.crop-status')?.textContent.includes(zoom.toFixed(1) + '×'), { zoom });
 }
 export async function startCameras(page) {
-  await page.locator('#host-camera-toggle').click();
-  await page.waitForFunction(() => document.querySelector('#host-camera-toggle').textContent === '停止现场摄像头' && !document.querySelector('#host-camera-toggle').disabled);
+  if (await page.locator('#host-camera-toggle').textContent() === '启动摄像头') await page.locator('#host-camera-toggle').click();
+  await page.waitForFunction(() => document.querySelector('#host-camera-toggle').textContent === '关闭摄像头' && !document.querySelector('#host-camera-toggle').disabled);
+}
+export async function noWebMedia(page) {
+  return page.evaluate(() => ({ requests: window.testMediaRequests.length, peers: window.testPeers.length, elements: document.querySelectorAll('video,audio,canvas').length, jsonOnly: window.testMessages.every(data => typeof data === 'string' && data.length < 8192 && !JSON.parse(data).data?.description && !JSON.parse(data).data?.candidate) }));
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compositeSettings, coverRect, pipRect } from '../host/composite.js';
-import { selectCameras } from '../host/capture.js';
+
 
 test('1080p/30 defaults and bounded configurable output', () => {
   assert.deepEqual(compositeSettings(), { width: 1920, height: 1080, fps: 30 });
@@ -20,12 +20,4 @@ test('main covers the canvas without stretching; PIP stays inside the lower righ
     const p = pipRect(w, h);
     assert.ok(p.x > w / 2 && p.y > h / 2 && p.x + p.width < w && p.y + p.height < h);
   }
-});
-test('USB precedes the integrated front camera regardless of enumeration order', () => {
-  const device = (label, deviceId) => ({ label, deviceId, kind: 'videoinput' });
-  const devices = [device('Surface Camera Rear', 'rear'), device('Surface IR', 'ir'), device('Surface Camera Front', 'front'), device('PC Camera (USB)', 'usb')];
-  assert.deepEqual(selectCameras(devices).map(d => d.deviceId), ['usb', 'front']);
-  assert.deepEqual(selectCameras(devices, ['PC Camera (USB)', 'Surface Camera Rear']).map(d => d.deviceId), ['usb', 'rear']);
-  assert.throws(() => selectCameras(devices, ['PC Camera (USB)', 'PC Camera (USB)']));
-  assert.throws(() => selectCameras([devices[2]]));
 });

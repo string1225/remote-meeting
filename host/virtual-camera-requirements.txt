@@ -1,2 +1,4 @@
 pyvirtualcam==0.15.0
 numpy>=2.0,<3
+opencv-python-headless>=4.12,<5
+pygrabber==0.2

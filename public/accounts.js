@@ -31,7 +31,7 @@ export function initAccounts(notify) {
   }
   $('login').onclick = async () => {
     $('login').disabled = true;
-    try { await ensureLoggedIn(); notify('登录成功，可以连接主机。'); }
+    try { await ensureLoggedIn(); notify('登录成功。'); }
     catch (error) { notify(error.message, true); }
     finally { $('login').disabled = false; }
   };
@@ -106,5 +106,5 @@ export function initAccounts(notify) {
     event.preventDefault();
     void change(event.submitter, () => api(`users/${resetId}`, 'PATCH', { password: $('reset-password').value }), '新口令已保存，旧登录和连接已失效。');
   };
-  return { ensureLoggedIn, current: () => account };
+  return { ensureLoggedIn, refresh: loadSession, current: () => account };
 }

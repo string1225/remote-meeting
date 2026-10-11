@@ -40,12 +40,13 @@ export function cropControls(video, camera, initial, send) {
   map.onpointerdown = e => { map.setPointerCapture(e.pointerId); locate(e); }; map.onpointermove = e => { if (map.hasPointerCapture(e.pointerId)) locate(e); };
   map.onkeydown = e => { if (!enabled) return; const d = 0.1 / view.zoom; if (e.key === 'ArrowLeft') view.x -= d; else if (e.key === 'ArrowRight') view.x += d; else if (e.key === 'ArrowUp') view.y -= d; else if (e.key === 'ArrowDown') view.y += d; else return; e.preventDefault(); update(); };
   const content = () => { const r = video.getBoundingClientRect(), width = Math.min(r.width, r.height * source.width / source.height), height = width * source.height / source.width; return { width, height, left: r.left + (r.width - width) / 2, top: r.top + (r.height - height) / 2 }; };
-  let drag; video.style.touchAction = 'none';
+  let drag; if (video) { video.style.touchAction = 'none';
   video.onpointerdown = e => { if (!enabled) return; video.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, view: { ...view } }; };
   video.onpointermove = e => { if (!drag || !video.hasPointerCapture(e.pointerId)) return; const r = content(); view.x = drag.view.x - (e.clientX - drag.x) / r.width / view.zoom; view.y = drag.view.y - (e.clientY - drag.y) / r.height / view.zoom; update(); };
   video.onpointerup = video.onpointercancel = () => { drag = null; };
+  }
   const wheel = e => { if (!enabled) return; e.preventDefault(); const r = content(); zoom(view.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), clamp((e.clientX - r.left) / r.width, 0, 1), clamp((e.clientY - r.top) / r.height, 0, 1)); };
-  video.addEventListener('wheel', wheel, { passive: false }); render();
+  video?.addEventListener('wheel', wheel, { passive: false }); render();
   return { element: panel, overlay, get view() { return { ...view }; }, resend: transmit,
     setEnabled(value) {
       const wasEnabled = enabled; enabled = value;
@@ -66,6 +67,6 @@ export function cropControls(video, camera, initial, send) {
       appliedText = `USB 画面已更新 · ${m.outputWidth} × ${m.outputHeight} · ${m.zoom.toFixed(1)}× · 所有远端同步`;
       status.textContent = enabled ? appliedText : '启动现场摄像头后可控制 USB 画面';
     },
-    dispose() { disposed = true; clearTimeout(timer); clearTimeout(retryTimer); video.removeEventListener('wheel', wheel); video.onpointerdown = video.onpointermove = video.onpointerup = video.onpointercancel = null; }
+    dispose() { disposed = true; clearTimeout(timer); clearTimeout(retryTimer); if (video) { video.removeEventListener('wheel', wheel); video.onpointerdown = video.onpointermove = video.onpointerup = video.onpointercancel = null; } }
   };
 }

@@ -4,44 +4,65 @@ import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { compositeSettings } from './composite.js';
 
-export function createVirtualCamera(config = {}, publish = () => {}, acknowledge = () => {}) {
+export function createVirtualCamera(config = {}, publish = () => {}) {
   config ||= {};
-  let child, settings, ready = false, busy = false, timer, state;
-  function update(next, message = '', device = '') { state = next; publish({ type: 'virtual-camera-state', state: next, message, device }); }
-  function stop() {
-    clearTimeout(timer); const old = child; child = null; ready = busy = false;
-    old?.stdin.destroy(); old?.kill(); update('stopped');
+  let child, timer, state, version = 0, closing = Promise.resolve();
+  const update = (next, message = '', extra = {}) => { state = next; publish({ type: 'virtual-camera-state', state: next, message, ...extra }); };
+  async function closeChild() {
+    clearTimeout(timer);
+    const old = child; child = null;
+    if (!old) return closing;
+    const released = new Promise(resolve => {
+      if (old.exitCode !== null || old.signalCode !== null) { resolve(); return; }
+      const kill = setTimeout(() => old.kill(), 2000);
+      old.once('close', () => { clearTimeout(kill); resolve(); });
+      old.stdin.end();
+    });
+    closing = Promise.all([closing, released]).then(() => {});
+    return closing;
   }
   return {
-    start(output) {
-      stop(); settings = compositeSettings(output);
+    async start(output) {
+      const generation = ++version;
+      update('starting'); await closeChild();
+      if (version !== generation) return;
       if (config.enabled === false) { update('disabled'); return; }
-      update('starting');
+      const settings = compositeSettings(output);
       const process = spawn(config.pythonPath || resolve('.local/virtual-camera/Scripts/python.exe'),
         ['-u', fileURLToPath(new URL('./virtual-camera.py', import.meta.url)), String(settings.width), String(settings.height), String(settings.fps)],
         { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       child = process;
-      const lines = createInterface({ input: process.stdout });
-      lines.on('line', line => {
+      let diagnostics = '';
+      createInterface({ input: process.stdout }).on('line', line => {
         if (child !== process) return;
         try {
           const message = JSON.parse(line);
-          if (message.type === 'ready') { clearTimeout(timer); ready = true; update('ready', '', message.device); acknowledge(); }
-          else if (message.type === 'frame') { busy = false; acknowledge(); }
-          else if (message.type === 'error') { ready = false; update('error', message.message); }
-        } catch { /* Only structured worker status is used. */ }
+          if (message.type === 'ready') { clearTimeout(timer); update('ready', '', { device: message.device, cameras: message.cameras }); }
+          else if (message.type === 'viewport-applied' || message.type === 'metrics') publish(message);
+          else if (message.type === 'error') { clearTimeout(timer); update('error', message.message); }
+        } catch { /* Ignore non-structured diagnostics. */ }
       });
-      let diagnostics = '';
       process.stderr.on('data', data => { diagnostics = (diagnostics + data).slice(-1000); });
       process.stdin.on('error', () => {});
-      process.on('error', error => { if (child === process) { clearTimeout(timer); ready = false; update('error', `无法启动虚拟摄像头：${error.message}`); } });
-      process.on('exit', code => { if (child === process) { clearTimeout(timer); child = null; ready = false; if (state !== 'error') update('error', diagnostics || `虚拟摄像头进程退出 (${code})`); } });
-      timer = setTimeout(() => { if (child === process && !ready) { stop(); update('error', '虚拟摄像头启动超时，请检查 Python 和 OBS 驱动'); } }, 10000);
+      process.on('error', error => { if (child === process) { clearTimeout(timer); update('error', '无法启动虚拟摄像头：' + error.message); } });
+      process.on('close', code => {
+        if (child !== process) return;
+        clearTimeout(timer); child = null;
+        if (state !== 'error') update('error', diagnostics || '虚拟摄像头进程退出 (' + code + ')');
+      });
+      process.stdin.write(JSON.stringify({ cameras: config.cameras || [], synthetic: config.synthetic === true }) + '\n');
+      timer = setTimeout(() => {
+        if (child !== process || state !== 'starting') return;
+        void closeChild().then(() => { if (version === generation) update('error', '摄像头启动超时，请检查设备占用和独立虚拟摄像头驱动'); });
+      }, 30000);
     },
-    frame(data) {
-      if (!ready || busy || data.length !== settings.width * settings.height * 4) return false;
-      busy = true; child.stdin.write(data); return true;
+    setView(view) {
+      if (!child || state !== 'ready') return false;
+      child.stdin.write(JSON.stringify({ type: 'viewport', ...view }) + '\n'); return true;
     },
-    stop
+    async stop() {
+      const generation = ++version; update('stopping'); await closeChild();
+      if (version === generation) update('stopped');
+    }
   };
 }

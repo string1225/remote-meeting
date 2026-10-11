@@ -8,3 +8,4 @@ playwright-report/
 *.pem
 *.key
 *.log
+__pycache__/

@@ -1,17 +1,13 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { randomBytes, createHmac } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { createHub } from './hub.js';
 import { createUserStore } from './users.js';
 import { authenticateAgent } from './agent-auth.js';
 
 const token = () => randomBytes(24).toString('base64url');
 const split = value => (value || '').split(',').map(v => v.trim()).filter(Boolean);
-const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/remote.js', ['remote.js', 'text/javascript']], ['/accounts.js', ['accounts.js', 'text/javascript']], ['/rtc.js', ['rtc.js', 'text/javascript']], ['/crop-controls.js', ['crop-controls.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']]]);
-assets.set('/meeting.css', ['meeting.css', 'text/css']);
-assets.set('/audio-meter.js', ['audio-meter.js', 'text/javascript']);
-assets.set('/audio-meter.css', ['audio-meter.css', 'text/css']);
-assets.set('/playback-controls.js', ['playback-controls.js', 'text/javascript']);
+const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/remote.js', ['remote.js', 'text/javascript']], ['/accounts.js', ['accounts.js', 'text/javascript']], ['/crop-controls.js', ['crop-controls.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']], ['/control.css', ['control.css', 'text/css']]]);
 
 export function createMeetingServer(options = {}) {
   const env = { ...process.env, ...options };
@@ -33,16 +29,6 @@ export function createMeetingServer(options = {}) {
     let entry = limits.get(key);
     if (!entry || now > entry.until) { entry = { count: 0, until: now + windowMs }; limits.set(key, entry); }
     return ++entry.count <= maximum;
-  }
-  function iceServers() {
-    const urls = split(env.STUN_URLS === undefined ? 'stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302' : env.STUN_URLS);
-    const servers = urls.length ? [{ urls }] : [];
-    const turn = split(env.TURN_URLS);
-    if (turn.length && env.TURN_SECRET) {
-      const username = `${Math.ceil((Date.now() + ttl) / 1000)}:${env.TURN_USERNAME_PREFIX || 'meeting'}`;
-      servers.push({ urls: turn, username, credential: createHmac('sha1', env.TURN_SECRET).update(username).digest('base64') });
-    }
-    return servers;
   }
   function json(res, status, data) {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -78,11 +64,11 @@ export function createMeetingServer(options = {}) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'self' blob:; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=()');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'none'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
     try {
       const path = new URL(req.url, 'http://localhost').pathname;
-      if (req.method === 'GET' && path === '/api/health') return json(res, 200, { status: 'ok', mode: 'signaling-only' });
+      if (req.method === 'GET' && path === '/api/health') return json(res, 200, { status: 'ok', mode: 'control-only' });
       // Machine-authenticated management is scoped to remote accounts. The key
       // stays in the local Node service; browser sessions cannot use this route.
       if (path === '/api/agent/users' || path.startsWith('/api/agent/users/')) {
@@ -167,7 +153,7 @@ export function createMeetingServer(options = {}) {
   });
   server.headersTimeout = 15_000;
   server.requestTimeout = 15_000;
-  const hub = createHub(server, { hostKey: env.HOST_AGENT_KEY, sessionFor, originAllowed, rate, address, iceServers, reconnectMs: Number(env.RECONNECT_GRACE_MS || 30000) });
+  const hub = createHub(server, { hostKey: env.HOST_AGENT_KEY, sessionFor, originAllowed, rate, address, reconnectMs: Number(env.RECONNECT_GRACE_MS || 30000) });
   const cleanup = setInterval(() => {
     for (const [key, session] of sessions) if (session.expiresAt < Date.now()) { sessions.delete(key); hub.revokeSession(key); }
     for (const [key, entry] of limits) if (entry.until < Date.now()) limits.delete(key);

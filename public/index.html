@@ -1,32 +1,17 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 远程现场</title><link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./meeting.css"><link rel="stylesheet" href="./audio-meter.css"><script type="module" src="./app.js"></script></head>
-<body><header><a class="brand" href="./"><span class="brand-icon">◈</span> 同屏 <small>REMOTE WORKSPACE</small></a><span class="badge"><i></i> 远程现场</span></header><main>
-<section id="lobby" class="lobby"><div class="intro"><span class="eyebrow">YOUR WINDOW INTO THE DETAILS.</span><h1>连接现场，<br>看清每个细节。</h1><p>连接现场主机，按需启动摄像头。<br>USB 主画面与右下角画中画，一屏查看。</p><div class="features"><span>单路合成画面</span><span>USB 缩放与移动</span><span>低负载传输</span></div><div class="flow"><b>现场常驻主机</b><span>⇄</span><b>远端网页 × 2</b><small>现场画面，同步控制。</small></div></div>
-<div class="setup panel"><div class="section-top"><span class="step">01</span><h2>连接现场主机</h2></div><form id="setup-form"><input id="name" type="hidden" value="远端用户">
-          <div id="admin-field" class="auth-panel">
-            <div id="login-fields">
-              <div class="form-pair"><label>远端账号<input id="username" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="主机分配的账号"></label><label>登录密钥<input id="admin-key" type="password" autocomplete="current-password" maxlength="128" placeholder="主机设置的密钥"></label></div>
-              <p class="hint full">请使用现场主机为你配置的账号和密钥登录，姓名由主机统一设置。</p>
-              <button id="login" type="button" class="secondary full">登录账号</button>
-            </div>
-            <div id="signed-in" hidden><strong id="account-name"></strong><div class="account-actions"><button id="manage-users" type="button" class="secondary" hidden>账号管理</button><button id="logout" type="button" class="text-button">退出登录</button></div></div>
-          </div>
-
-<p id="host-status" class="host-status">登录后查看主机状态</p><label>参与方式<select id="mode"><option value="video">摄像头 + 麦克风</option><option value="audio">仅麦克风</option><option value="listen">旁听 · 不开启设备</option></select></label>
-<button id="devices-button" type="button" class="secondary full">检测我的摄像头和麦克风</button><div id="device-fields" hidden><label id="camera1-field">我的摄像头<select id="camera1"></select></label><label id="mic-field">我的麦克风<select id="microphone"></select></label></div>
-<button id="join-button" type="submit" class="primary full">登录并连接主机 <span>↗</span></button><p class="hint">连接后点击“启动现场摄像头”。USB 摄像头铺满主画面，笔记本摄像头位于右下角；两位远端共享画面和控制。请使用耳机避免回声。</p></form><div id="lobby-audio"></div></div></section>
-<section id="meeting" hidden><div class="meeting-top"><div><span class="eyebrow">LIVE REMOTE WORKSPACE</span><h1>现场主画面 <span id="people-count">1 / 3</span></h1><p id="capture-info" class="hint">连接后可启动现场摄像头</p></div><button id="play-audio" class="secondary">播放远端声音</button></div>
-<div class="workspace">
-  <section id="main-stage" class="main-stage" aria-label="主机主画面"><div id="host-videos"></div><div id="empty-state" class="empty-state">连接后点击“启动现场摄像头”</div><button id="main-fullscreen" type="button" class="fullscreen-button" aria-label="主画面全屏" aria-pressed="false" disabled>全屏查看</button></section>
-  <aside class="video-sidebar panel" aria-label="摄像头与远端参与者">
-    <h2>现场摄像头 <small>USB 主画面 · 笔记本右下角画中画</small></h2><button id="host-camera-toggle" type="button" class="primary full" aria-pressed="false" disabled>启动现场摄像头</button><p id="system-camera-status" class="hint" role="status"></p><p class="hint">启动、停止和 USB 视野调整会同步到所有远端。停止摄像头后仍可继续语音通话。</p>
-    <h2 class="remote-heading">远端参与者</h2><div id="remote-videos" class="remote-grid"></div><p id="remote-empty" class="hint">尚无远端视频画面</p><div id="remote-audio"></div>
-    <details class="connection-details"><summary>连接状态</summary><div id="signal-status">正在连接…</div><div id="participants"></div></details>
-    <p class="hint sidebar-hint">方向键移动 USB 视野，＋ / − 调整倍率。也可滚轮缩放、拖动画面。画中画位置固定。</p>
-  </aside>
-</div>
-<div class="meeting-bottom"><div id="meeting-audio"></div><div class="controls"><button id="mute" class="secondary">关闭麦克风</button><button id="camera-toggle" class="secondary">关闭摄像头</button><button id="leave" class="danger">断开主机</button></div></div></section>
-    <dialog id="users-dialog" aria-labelledby="users-title">
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 摄像头控制板</title><link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./control.css"><script type="module" src="./app.js"></script></head>
+<body><header><a class="brand" href="./"><span class="brand-icon">◈</span> 同屏 <small>CAMERA CONTROL</small></a><span class="badge"><i></i> 钉钉摄像头控制</span></header><main>
+<section id="lobby" class="intro"><span class="eyebrow">CAMERA CONTROL</span><h1>画面在钉钉，<br>控制在这里。</h1><p>登录后自动启动现场虚拟摄像头。<br>在控制板调整 USB 画面的放大倍率与位置。</p></section>
+<section class="panel account-panel"><form id="setup-form"><input id="name" type="hidden" value="远端用户"><div id="admin-field">
+<div id="login-fields"><div class="form-pair"><label>远端账号<input id="username" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="主机分配的账号" required></label><label>登录密钥<input id="admin-key" type="password" autocomplete="current-password" maxlength="128" placeholder="主机设置的密钥" required></label></div><button id="login" type="button" class="primary full">登录控制板 <span>↗</span></button><p class="hint">登录后直接进入控制板。查看画面和通话请使用钉钉会议。</p></div>
+<div id="signed-in" hidden><strong id="account-name"></strong><div class="account-actions"><button id="manage-users" type="button" class="secondary" hidden>账号管理</button><button id="logout" type="button" class="text-button">退出登录</button></div></div>
+</div></form></section>
+<section id="meeting" hidden>
+<div class="meeting-top"><div><span class="eyebrow">USB CAMERA</span><h1>摄像头控制板 <span id="people-count">0 / 2 位远端</span></h1><p id="capture-info" class="hint">1920 × 1080 / 30 fps</p></div><button id="leave" type="button" class="secondary">断开控制</button></div>
+<div class="control-grid"><section class="panel zoom-panel"><div class="panel-heading"><h2>USB 画面缩放与位置</h2><span class="hint">1–8× 数字缩放</span></div><div id="usb-controls"></div><p class="hint">方向按钮移动视野，＋ / − 调整倍率；也可拖动滑块、点击定位框或用方向键移动。笔记本画中画保持在右下角。</p></section>
+<aside class="panel output-panel"><span class="eyebrow">VIRTUAL CAMERA</span><h2>钉钉虚拟摄像头</h2><p id="host-status" class="host-status" role="status">正在读取主机状态…</p><p id="system-camera-status" class="hint" role="status"></p><button id="host-camera-toggle" type="button" class="primary full" disabled>摄像头正在准备…</button><p class="hint">本地钉钉会议请选择 <strong>Remote Meeting Camera</strong>。摄像头和麦克风在钉钉中使用。</p><p class="hint">关闭摄像头会释放两台原设备；退出控制板后虚拟输出继续保持。</p><div class="connection-info"><p id="signal-status" role="status">正在连接控制板…</p><button id="join-button" type="button" class="secondary">重新连接控制</button><details><summary>在线控制人员</summary><div id="participants"></div></details></div></aside></div>
+</section>
+<dialog id="users-dialog" aria-labelledby="users-title">
       <div class="dialog-top"><div><span class="eyebrow">HOST ACCOUNTS</span><h2 id="users-title">远端账号管理</h2></div><button id="close-users" type="button" class="secondary" aria-label="关闭账号管理">关闭</button></div>
       <p class="hint">每个账号有独立口令，至少 6 位。管理员可管理账号，远端用户可连接主机。重置口令、停用或删除账号会使该账号退出登录，并断开该账号的远端连接。</p>
       <p id="users-message" role="status" hidden></p>
@@ -43,8 +28,4 @@
         <button type="submit" class="primary full">新增账号 <span>＋</span></button>
       </form>
     </dialog>
-    <div id="message" role="status" aria-live="polite" hidden></div>
-  </main>
-  <footer><span>同屏 / REMOTE MEETING</span><span>小规模会议，保持直接。</span></footer>
-</body>
-</html>
+<div id="message" role="status" aria-live="polite" hidden></div></main><footer><span>同屏 / CAMERA CONTROL</span><span>音视频通过钉钉会议传输。</span></footer></body></html>

@@ -28,7 +28,6 @@ USERS_FILE=/var/lib/remote-meeting/users.json
 COOKIE_PATH=/meeting/
 ALLOWED_ORIGINS=$origin
 TRUST_PROXY=true
-STUN_URLS=stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302
 ROOM_TTL_HOURS=8
 EOF
     unset admin_key

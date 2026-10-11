@@ -1,9 +1,8 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 现场主机</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/audio-meter.css"><link rel="stylesheet" href="/host.css"><script type="module" src="/host-app.js"></script></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>同屏 · 现场主机</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/host.css"><script type="module" src="/host-app.js"></script></head>
 <body class="host-console"><header><span class="brand">◈ 同屏 · 现场主机</span><span id="connection" class="badge">正在上线…</span></header><main>
 <div class="meeting-top"><div><span class="eyebrow">LOCAL HOST</span><h1>现场控制台 <span id="people-count">0 / 2 位远端</span></h1></div><div class="meeting-actions"><nav aria-label="主机视图"><button id="view-cameras" type="button" class="secondary" aria-controls="camera-view" aria-pressed="false">摄像头视图</button><button id="view-settings" type="button" class="secondary" aria-controls="access-settings" aria-pressed="true">人员配置</button></nav><button id="pause" class="danger">暂停远端接入</button></div></div>
 <p id="error" role="status" hidden></p>
-<div id="host-audio"></div>
 <section id="access-settings" class="panel access-settings" aria-labelledby="access-title">
   <div class="dialog-top"><div><span class="eyebrow">REMOTE ACCESS</span><h2 id="access-title">外部接入人员配置</h2></div><button id="refresh-accounts" type="button" class="secondary">刷新列表</button></div>
   <p class="hint access-help">在此配置每位人员的姓名、账号和登录密钥，保存后立即用于远端登录。可配置多位人员，最多两位同时接入。暂停接入时仍可调整配置。</p>
@@ -25,8 +24,8 @@
 </section>
 <section id="camera-view" aria-label="摄像头视图" hidden>
   <div class="host-live-grid">
-    <section class="panel host-camera-panel" aria-labelledby="local-cameras-title"><div class="host-camera-heading"><h2 id="local-cameras-title">本地合成画面</h2><strong id="capture-status">待机 · 等待远端登录连接</strong></div><div class="account-actions"><button id="local-camera-toggle" type="button" class="primary">启动摄像头</button></div><p class="hint">关闭摄像头后会释放 USB 和笔记本摄像头，其他软件可直接选择原设备。</p><p id="virtual-camera-status" class="hint" role="status">系统虚拟摄像头已停止</p><div id="sources" class="host-sources"></div><p id="sources-empty" class="empty-state">远端连接后点击“启动现场摄像头”</p></section>
-    <section class="panel host-camera-panel" aria-labelledby="remote-cameras-title"><div class="host-camera-heading"><h2 id="remote-cameras-title">远端参与者</h2><button id="play-audio" class="secondary">播放远端声音</button></div><div id="remote-media" class="video-grid"></div><p id="remote-empty" class="empty-state">等待远端接入</p><div id="remote-audio"></div></section>
+    <section class="panel host-camera-panel" aria-labelledby="local-cameras-title"><div class="host-camera-heading"><h2 id="local-cameras-title">钉钉虚拟摄像头</h2><strong id="capture-status">待机 · 原摄像头已释放</strong></div><p id="output-settings"></p><p class="hint">远端登录并连接控制板后自动启动。也可在本地启动；麦克风请在钉钉会议中选择。</p><div class="account-actions"><button id="local-camera-toggle" type="button" class="primary">启动摄像头</button></div><p class="hint">关闭后释放 USB 和笔记本摄像头，其他软件可直接使用原设备。</p><p id="virtual-camera-status" class="hint" role="status">系统虚拟摄像头已停止</p><p id="capture-devices" class="hint"></p></section>
+    <section class="panel host-camera-panel"><h2>使用方式</h2><p>在钉钉会议的摄像头设置中选择 <strong>Remote Meeting Camera</strong>。</p><p class="hint">USB 摄像头铺满画面，笔记本前置摄像头固定在右下角。远端网页仅控制缩放与位置，画面和声音通过钉钉会议传输。</p><p class="hint">远端离开或暂停远端控制后，虚拟摄像头继续输出；需要释放原摄像头时，点击“关闭摄像头”。</p></section>
   </div>
   <details class="host-connections"><summary>连接状态</summary><div id="participants"></div></details>
 </section>

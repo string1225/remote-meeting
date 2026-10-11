@@ -1,15 +1,17 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import { authenticateAgent } from './agent-auth.js';
+import { normalizeView } from '../host/crop.js';
+import { compositeSettings } from '../host/composite.js';
 
 const error = (status, message) => Object.assign(new Error(message), { status });
 const describe = p => ({ id: p.id, role: p.role, name: p.name });
 
-export function createHub(server, { hostKey, sessionFor, originAllowed, rate, address, iceServers, reconnectMs = 30000 }) {
+export function createHub(server, { hostKey, sessionFor, originAllowed, rate, address, reconnectMs = 30000 }) {
   if (typeof hostKey !== 'string' || hostKey.length < 32 || hostKey.startsWith('replace-')) throw new Error('HOST_AGENT_KEY must contain at least 32 random characters');
   const remotes = new Map(), connections = new Map();
   let host = null, hostState = { state: 'offline', cameras: [] };
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 8192, perMessageDeflate: false });
   function send(ws, message) {
     if (ws?.readyState !== WebSocket.OPEN) return;
     if (ws.bufferedAmount > 256 * 1024) { ws.close(1008, 'Slow consumer'); return; }
@@ -52,7 +54,7 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
       peer = host = { id: randomUUID(), role: 'host', name: '现场主机', ws };
       hostState = { state: 'idle', cameras: [] };
       clearTimeout(joinTimer);
-      send(ws, { type: 'joined', self: describe(peer), peers: connected().map(describe), iceServers: iceServers() });
+      send(ws, { type: 'joined', self: describe(peer), peers: connected().map(describe) });
       broadcast({ type: 'peer-joined', peer: describe(peer) }, peer);
       broadcast({ type: 'host-state', ...hostState }, peer);
     }
@@ -71,7 +73,7 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
           if (!host) return fail('HOST_OFFLINE', '现场主机离线，请等待主机上线');
           peer = reservation; peer.ws = ws; peer.request = req;
           clearTimeout(joinTimer);
-          send(ws, { type: 'joined', self: describe(peer), peers: [host, ...connected().filter(p => p !== peer)].map(describe), iceServers: iceServers(), expiresAt: session.expiresAt, hostState });
+          send(ws, { type: 'joined', self: describe(peer), peers: [host, ...connected().filter(p => p !== peer)].map(describe), expiresAt: session.expiresAt, hostState });
           broadcast({ type: 'peer-joined', peer: describe(peer) }, peer);
           return;
         }
@@ -80,26 +82,19 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
         if (msg.type === 'host-state' && agent) {
           if (!['idle', 'starting', 'capturing', 'error'].includes(msg.state)) return;
           hostState = { state: msg.state, message: String(msg.message || '').slice(0, 240), cameras: (Array.isArray(msg.cameras) ? msg.cameras : []).slice(0, 2).map((c, index) => ({ camera: index, label: String(c.label || '').slice(0, 100), width: Math.max(0, Math.min(32768, Number(c.width) || 0)), height: Math.max(0, Math.min(32768, Number(c.height) || 0)), frameRate: Math.max(0, Math.min(120, Number(c.frameRate) || 0)) })) };
-          hostState.output = { width: msg.output?.width === 1280 ? 1280 : 1920, height: msg.output?.width === 1280 ? 720 : 1080, fps: Math.max(5, Math.min(30, Math.round(Number(msg.output?.fps) || 30))) };
+          hostState.output = compositeSettings(msg.output);
+          if (msg.view) { try { hostState.view = { ...normalizeView(msg.view), camera: 0, shared: true, outputWidth: hostState.output.width, outputHeight: hostState.output.height }; } catch {} }
+          if (['ready', 'starting', 'stopping', 'stopped', 'disabled', 'error'].includes(msg.virtualCamera?.state)) hostState.virtualCamera = { state: msg.virtualCamera.state, device: String(msg.virtualCamera.device || '').slice(0, 100), message: String(msg.virtualCamera.message || '').slice(0, 240), measuredFps: Math.max(0, Math.min(60, Number(msg.virtualCamera.measuredFps) || 0)) };
           broadcast({ type: 'host-state', ...hostState }, peer); return;
         }
-        if (msg.type !== 'signal') return;
-        const target = [host, ...connected()].find(p => p?.id === msg.to);
-        if (!target || target === peer) return;
+        if (msg.type === 'signal') return fail('CONTROLS_ONLY', '网页仅支持摄像头控制，请刷新页面');
+        if (msg.type !== 'control' || agent || !host) return;
         const data = msg.data;
-        if (!data || typeof data !== 'object') return;
-        if (data.description) {
-          const d = data.description;
-          if (!['offer', 'answer'].includes(d.type) || typeof d.sdp !== 'string' || d.sdp.length > 48000) return fail('INVALID', '无效 SDP');
-          const streams = (Array.isArray(data.streams) ? data.streams : []).slice(0, 3).map(s => ({ id: String(s.id || '').slice(0, 100), label: String(s.label || '').slice(0, 100), kind: s.kind === 'audio' ? 'audio' : 'video', camera: agent && [0, 1].includes(s.camera) ? s.camera : undefined }));
-          send(target.ws, { type: 'signal', from: peer.id, data: { description: { type: d.type, sdp: d.sdp }, streams } });
-        } else if (data.candidate && typeof data.candidate.candidate === 'string' && data.candidate.candidate.length <= 2048) {
-          const c = data.candidate;
-          if (c.sdpMid !== null && typeof c.sdpMid !== 'string') return;
-          if (c.sdpMLineIndex !== null && (!Number.isInteger(c.sdpMLineIndex) || c.sdpMLineIndex < 0 || c.sdpMLineIndex > 20)) return;
-          send(target.ws, { type: 'signal', from: peer.id, data: { candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex, usernameFragment: typeof c.usernameFragment === 'string' ? c.usernameFragment.slice(0, 256) : undefined } } });
-        }
-      } catch { fail('INVALID', '无法解析消息'); }
+        if (data?.type === 'camera-start' || data?.type === 'camera-stop') send(host.ws, { type: 'control', from: peer.id, data: { type: data.type } });
+        else if (data?.type === 'viewport' && data.camera === 0) {
+          let view; try { view = normalizeView(data); } catch { return fail('INVALID', '无效的缩放或位置'); }
+          send(host.ws, { type: 'control', from: peer.id, data: { type: 'viewport', camera: 0, ...view } });
+        }      } catch { fail('INVALID', '无法解析消息'); }
     });
     ws.on('close', () => {
       clearTimeout(joinTimer);
