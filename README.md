@@ -56,9 +56,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File host/install-virtual-camera.
 node host/index.js
 ```
 
-安装器建立 `.local/virtual-camera` Python 环境，下载固定版本且核验 SHA-256 的 32 / 64 位 UnityCapture 驱动，注册当前用户的 **Remote Meeting Camera**。驱动文件保存在 `.local/independent-camera`，注册后不要移动或删除。安装无需管理员权限，不占用 Unity 默认设备或 OBS 设备；若专用设备槽已有其他注册，会中止而不覆盖。
+安装器建立 `.local/virtual-camera` Python 环境，下载固定版本且核验 SHA-256 的 32 / 64 位 UnityCapture 驱动，并在系统范围注册 **Remote Meeting Camera**。安装时 Windows 会要求管理员确认；驱动放在 `C:\Program Files\Remote Meeting Camera`。不占用 Unity 默认设备或 OBS 设备；若专用设备槽已有其他注册，会中止而不覆盖。
 
-仅重装驱动：`powershell -NoProfile -ExecutionPolicy Bypass -File host/install-camera-driver.ps1`。卸载本服务的摄像头：关闭本地输出和会议软件后，用同一脚本加 `-Uninstall`，只移除本服务拥有的注册。许可证保存在 `host/UnityCapture-LICENSE.txt` 并随安装复制。
+仅重装驱动：`powershell -NoProfile -ExecutionPolicy Bypass -File host/install-camera-driver.ps1 -Elevate`。加 `-WhatIf` 可预览注册范围而不修改系统。卸载本服务的摄像头：关闭本地输出和会议软件后，用同一脚本加 `-Uninstall -Elevate`，只移除本服务拥有的注册。许可证保存在 `host/UnityCapture-LICENSE.txt` 并随安装复制。
+
+早期版本只注册到当前用户，且使用了自定义 DevicePath；浏览器可读取不代表会议客户端也能列出。重新安装会迁移到 32 / 64 位系统注册、去掉伪造的硬件路径，让应用使用标准 DirectShow 设备标识，并清理本服务遗留的用户注册。安装后重新打开会议软件的摄像头设置检查；如果仍未显示，需要继续检查该客户端的 Media Foundation / DirectShow 枚举兼容，不能仅凭浏览器验收断言兼容。`-Scope User` 仅保留作当前用户范围的诊断选项。
 
 配置：`serverUrl` 为云端 `/meeting/` 地址；`agentKey` 与云端 `HOST_AGENT_KEY` 相同；`output` 默认 `{ "width": 1920, "fps": 30 }`；`virtualCamera.enabled` 默认 true，`pythonPath` 默认 `.local/virtual-camera/Scripts/python.exe`；`headless: false` 显示控制窗口。旧的 microphone / idleMs 字段不再使用。
 
