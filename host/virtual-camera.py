@@ -74,7 +74,7 @@ class Source:
         self.error = None
         try:
             if not self.camera.isOpened():
-                raise ValueError("无法打开摄像头：" + label)
+                raise ValueError("无法打开摄像头：" + label + "。请先让 OBS、钉钉等软件停止使用这一路原摄像头")
             self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
             self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, width)
             self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
@@ -129,13 +129,14 @@ class SyntheticSource:
 
 
 def main():
-    import pyvirtualcam
+    from mf_camera import NativeCamera
     cv2.setNumThreads(2)
     width, height, fps = map(int, sys.argv[1:4])
     if (width, height) not in ((1280, 720), (1920, 1080)) or not 5 <= fps <= 30:
         raise ValueError("Unsupported virtual camera settings")
     config = json.loads(sys.stdin.readline())
     sources, stop = [], threading.Event()
+    camera = None
     view, lock = dict(zoom=1, x=0.5, y=0.5), threading.Lock()
     revision = 0
 
@@ -153,6 +154,7 @@ def main():
 
     threading.Thread(target=controls, daemon=True).start()
     try:
+        camera = NativeCamera(width, height, fps)
         if config.get("synthetic"):
             sources = [SyntheticSource(0), SyntheticSource(1)]
         else:
@@ -163,7 +165,7 @@ def main():
                 sources.append(Source(index, names[index], w, h, fps))
         if stop.is_set():
             return
-        with pyvirtualcam.Camera(width=width, height=height, fps=fps, fmt=pyvirtualcam.PixelFormat.RGBA, backend="unitycapture", device="Remote Meeting Camera") as camera:
+        with camera:
             status(type="ready", device=camera.device, cameras=[s.info for s in sources])
             applied = -1
             started, frames, render_time, send_time = time.monotonic(), 0, 0.0, 0.0
@@ -175,7 +177,7 @@ def main():
                 output = compose(sources[0].latest(), sources[1].latest(), width, height, current)
                 render_time += time.perf_counter() - phase
                 phase = time.perf_counter()
-                camera.send(cv2.cvtColor(output, cv2.COLOR_BGR2RGBA))
+                camera.send(output)
                 send_time += time.perf_counter() - phase
                 if applied != version:
                     applied = version
@@ -190,6 +192,8 @@ def main():
                     started, frames, render_time, send_time = time.monotonic(), 0, 0.0, 0.0
     finally:
         stop.set()
+        if camera:
+            camera.close()
         for source in sources:
             source.close()
 

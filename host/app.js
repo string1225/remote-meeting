@@ -12,7 +12,7 @@ function render(status) {
   $('capture-status').textContent = status.state === 'capturing' ? '虚拟摄像头已开启' : status.state === 'starting' ? (status.virtualCamera.state === 'stopping' ? '正在关闭摄像头…' : '正在启动摄像头…') : status.state === 'error' ? '摄像头启动失败' : '待机 · 原摄像头已释放';
   $('local-camera-toggle').textContent = status.state === 'starting' ? '取消启动 / 关闭' : status.capturing ? '关闭摄像头' : '启动摄像头';
   $('output-settings').textContent = status.output.width + ' × ' + status.output.height + ' / ' + status.output.fps + ' fps · USB 主画面 + 右下角画中画';
-  $('virtual-camera-status').textContent = status.capturing ? '钉钉会议请选择 Remote Meeting Camera' : status.message || '系统虚拟摄像头已停止';
+  $('virtual-camera-status').textContent = status.capturing ? `钉钉会议请选择 ${status.virtualCamera.device}` : status.message || '系统虚拟摄像头已停止';
   $('capture-devices').textContent = status.cameras.map(c => c.label + ' · ' + c.width + ' × ' + c.height).join(' / ');
   $('error').hidden = !status.message; $('error').textContent = status.message;
   $('pause').textContent = status.paused ? '恢复远端控制' : '暂停远端控制';

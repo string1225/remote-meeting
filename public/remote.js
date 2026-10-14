@@ -28,7 +28,7 @@ function hostStatus(status) {
   const labels = { offline: '现场主机离线 · 等待上线', idle: '虚拟摄像头已关闭', starting: '正在准备虚拟摄像头…', capturing: '虚拟摄像头已开启 · 钉钉可使用', error: '摄像头异常：' + (status.message || '请检查本地设备') };
   $('host-status').textContent = labels[state] || '正在读取主机状态…';
   $('capture-info').textContent = (status.output?.width || 1920) + ' × ' + (status.output?.height || 1080) + ' / ' + (status.output?.fps || 30) + ' fps · USB 主画面 + 右下角笔记本画中画';
-  $('system-camera-status').textContent = status.virtualCamera?.state === 'ready' ? '系统摄像头：Remote Meeting Camera' : status.virtualCamera?.state === 'error' ? status.virtualCamera.message : '';
+  $('system-camera-status').textContent = status.virtualCamera?.state === 'ready' ? `系统摄像头：${status.virtualCamera.device}` : status.virtualCamera?.state === 'error' ? status.virtualCamera.message : '';
   renderButton();
   if (status.view) control.applied(status.view);
   clearTimeout(requestTimer);

@@ -1,0 +1,6 @@
+LIBRARY RemoteMeetingMediaSource
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE
+    RMCWriteFrame
+    RMCClearFrame

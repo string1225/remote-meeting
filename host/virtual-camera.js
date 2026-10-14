@@ -14,8 +14,15 @@ export function createVirtualCamera(config = {}, publish = () => {}) {
     if (!old) return closing;
     const released = new Promise(resolve => {
       if (old.exitCode !== null || old.signalCode !== null) { resolve(); return; }
-      const kill = setTimeout(() => old.kill(), 2000);
-      old.once('close', () => { clearTimeout(kill); resolve(); });
+      let forced;
+      const kill = setTimeout(() => {
+        if (process.platform === 'win32') {
+          // A Windows venv uses a launcher process; release its entire owned tree.
+          const killer = spawn('taskkill', ['/PID', String(old.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+          forced = new Promise(done => { killer.once('close', done); killer.once('error', () => { old.kill(); done(); }); });
+        } else old.kill('SIGKILL');
+      }, 2000);
+      old.once('close', () => { clearTimeout(kill); Promise.resolve(forced).then(resolve); });
       old.stdin.end();
     });
     closing = Promise.all([closing, released]).then(() => {});
@@ -53,7 +60,7 @@ export function createVirtualCamera(config = {}, publish = () => {}) {
       process.stdin.write(JSON.stringify({ cameras: config.cameras || [], synthetic: config.synthetic === true }) + '\n');
       timer = setTimeout(() => {
         if (child !== process || state !== 'starting') return;
-        void closeChild().then(() => { if (version === generation) update('error', '摄像头启动超时，请检查设备占用和独立虚拟摄像头驱动'); });
+        void closeChild().then(() => { if (version === generation) update('error', '摄像头启动超时，请检查设备占用和 Windows 原生虚拟摄像头安装'); });
       }, 30000);
     },
     setView(view) {
