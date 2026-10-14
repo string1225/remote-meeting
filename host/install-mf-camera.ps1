@@ -39,15 +39,27 @@ if($InstallComponents){
     try{$file.SetLength(64+1920*1080*3/2)}finally{$file.Dispose()}
   }elseif((Get-Item -LiteralPath $framePath).Length -ne 64+1920*1080*3/2){throw 'Existing frame transport has an unexpected size.'}
   $root=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)
+  $previousDll=$null
   try{
     $classPath='Software\Classes\CLSID\'+$clsid
     $old=$root.OpenSubKey($classPath)
     if($old){try{if($old.GetValue('') -ne 'Remote Meeting Camera Media Foundation Source'){throw 'Native media source CLSID belongs to another application.'}}finally{$old.Dispose()}}
+    $oldServer=$root.OpenSubKey($classPath+'\InprocServer32')
+    if($oldServer){try{$previousDll=$oldServer.GetValue('')}finally{$oldServer.Dispose()}}
     $key=$root.CreateSubKey($classPath);try{$key.SetValue('','Remote Meeting Camera Media Foundation Source')}finally{$key.Dispose()}
     $key=$root.CreateSubKey($classPath+'\InprocServer32');try{$key.SetValue('',$installedDll);$key.SetValue('ThreadingModel','Both')}finally{$key.Dispose()}
     $key=$root.CreateSubKey('SOFTWARE\RemoteMeetingCamera')
     try{$key.SetValue('ControllerPath',$installedController);$key.SetValue('DllPath',$installedDll);$key.SetValue('FramePath',$framePath);$key.SetValue('OwnerSid',$OwnerSid)}finally{$key.Dispose()}
   }finally{$root.Dispose()}
+  # COM can retain the old DLL in Frame Server after its registry path changes.
+  # Refresh only when upgrading an already registered media source.
+  if($previousDll -and $previousDll -ne $installedDll){
+    $frameServer=Get-Service -Name FrameServer -ErrorAction SilentlyContinue
+    if($frameServer -and $frameServer.Status -eq 'Running'){
+      Restart-Service -Name FrameServer -Force
+      Write-Output 'Windows Frame Server refreshed for the media source update.'
+    }
+  }
   Write-Output 'Native Frame Server component installed.'
   return
 }
