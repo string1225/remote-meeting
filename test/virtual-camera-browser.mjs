@@ -21,11 +21,11 @@ try {
     return color === 'red' ? r > 170 && b < 90 : color === 'blue' ? b > 170 && r < 90 : g > 130 && r < 90 && b < 130;
   }, { color, pip }, { polling: 100 });
   await remote.waitForFunction(() => !document.querySelector('.crop-controls input').disabled);
-  await setView(remote, 0, 2, 0.25); await sample('red'); await sample('green', true);
-  await setView(remote, 0, 2, 0.75); await sample('blue'); await sample('green', true);
+  await setView(remote, 0, 2, 0.25); await sample('blue'); await sample('green', true);
+  await setView(remote, 0, 2, 0.75); await sample('red'); await sample('green', true);
   await remote.locator('#leave').click(); await stack.host.waitForFunction(() => window.hostDiagnostics().peers.length === 0);
-  assert.equal(stack.local.hostStatus().virtualCamera.state, 'ready'); await sample('blue');
-  await stack.host.reload(); await stack.host.waitForFunction(() => window.hostDiagnostics()?.capturing); await sample('blue');
+  assert.equal(stack.local.hostStatus().virtualCamera.state, 'ready'); await sample('red');
+  await stack.host.reload(); await stack.host.waitForFunction(() => window.hostDiagnostics()?.capturing); await sample('red');
   await stack.host.locator('#view-cameras').click();
   for (const page of [stack.host, remote]) assert.deepEqual(await noWebMedia(page), { requests: 0, peers: 0, elements: 0, jsonOnly: true });
   await stack.host.locator('#local-camera-toggle').click(); await stack.host.waitForFunction(() => window.hostDiagnostics().virtualCamera.state === 'stopped');

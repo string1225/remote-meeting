@@ -57,10 +57,13 @@ def cover(frame, width, height, view):
 
 
 def compose(main, pip, width, height, view):
-    output = cover(main, width, height, view)
-    pw, margin = round(width * 0.26), round(width * 0.02)
+    # View coordinates follow the mirrored USB image; place PIP afterwards so
+    # its orientation and lower-right output anchor stay independent.
+    output = cover(main[:, ::-1], width, height, view)
+    pw = round(width * 0.26)
+    margin_x, margin_y = round(width * 0.02), round(height * 0.02)
     ph = round(pw * 9 / 16)
-    x, y = width - pw - margin, height - ph - margin
+    x, y = width - pw - margin_x, height - ph - margin_y
     output[y - 2:y + ph + 2, x - 2:x + pw + 2] = 255
     output[y:y + ph, x:x + pw] = cover(pip, pw, ph, dict(zoom=1, x=0.5, y=0.5))
     return output

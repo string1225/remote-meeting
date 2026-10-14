@@ -19,13 +19,17 @@ class NativeCameraTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 native.select_cameras(names, configured)
 
-    def test_native_pixels_zoom_usb_while_lower_right_pip_stays_fixed(self):
+    def test_mirrored_usb_controls_keep_unmirrored_pip_in_lower_right(self):
         usb, pip = native.SyntheticSource(0).frame, native.SyntheticSource(1).frame
-        for x, expected in [(0.25, [25, 25, 232]), (0.75, [232, 59, 24])]:
+        for x, expected in [(0.25, [232, 59, 24]), (0.75, [25, 25, 232])]:
             image = native.compose(usb, pip, 1920, 1080, native.normalize(dict(zoom=2, x=x, y=0.5)))
             self.assertEqual(image.shape, (1080, 1920, 3))
             self.assertEqual(image[540, 960].tolist(), expected)
             self.assertEqual(image[907, 1497].tolist(), [64, 191, 20])
+            self.assertEqual(image[907, 1800].tolist(), [22, 202, 232])
+            self.assertEqual(image[1050, 1497].tolist(), [64, 191, 20])
+            self.assertEqual(image[1050, 100].tolist(), expected)
+            self.assertEqual(image[100, 1800].tolist(), expected)
         self.assertEqual(native.normalize(dict(zoom=2, x=0, y=1)), dict(zoom=2, x=0.25, y=0.75))
         for value in [float("inf"), float("nan"), True, "2"]:
             with self.assertRaises(ValueError):
