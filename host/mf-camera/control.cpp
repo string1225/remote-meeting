@@ -46,6 +46,13 @@ static HRESULT SelfTest(LPCWSTR dll,LPCWSTR framePath){
     HMODULE module=LoadLibraryW(dll);if(!module)return HRESULT_FROM_WIN32(GetLastError());
     auto getClass=reinterpret_cast<HRESULT(WINAPI*)(REFCLSID,REFIID,void**)>(GetProcAddress(module,"DllGetClassObject"));if(!getClass)return E_NOINTERFACE;
     ComPtr<IClassFactory> factory;CHECK(getClass(CameraSourceClsid,IID_PPV_ARGS(&factory)));
+    {
+        ComPtr<IMFActivate> transient;CHECK(factory->CreateInstance(nullptr,IID_PPV_ARGS(&transient)));
+        ComPtr<IMFMediaSourceEx> retained;CHECK(transient->ActivateObject(IID_PPV_ARGS(&retained)));
+        transient.Reset();
+        DWORD characteristics=0;CHECK(retained->GetCharacteristics(&characteristics));
+        CHECK(retained->Shutdown());
+    }
     ComPtr<IMFActivate> activation;CHECK(factory->CreateInstance(nullptr,IID_PPV_ARGS(&activation)));
     if(framePath)CHECK(activation->SetString(FramePathAttribute,framePath));
     ComPtr<IMFMediaSourceEx> source;CHECK(activation->ActivateObject(IID_PPV_ARGS(&source)));

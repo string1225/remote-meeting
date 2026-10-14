@@ -8,12 +8,12 @@ let receiver;
 try {
   const remote = await remotePage(browser, stack.errors); await connectRemote(remote, stack.url, stack.password);
   await stack.host.waitForFunction(() => window.hostDiagnostics().virtualCamera.state === 'ready', null, { timeout: 40000 });
-  assert.equal(stack.local.hostStatus().virtualCamera.device, 'Remote Meeting Camera Windows Virtual Camera');
+  assert.match(stack.local.hostStatus().virtualCamera.device, /^Remote Meeting Camera.*Windows/);
   assert.equal(stack.local.hostStatus().microphone, false);
   assert.deepEqual(stack.local.hostStatus().output, { width: 1920, height: 1080, fps: 30 });
   receiver = await nativeReceiver(); const info = await openVirtual(receiver.page);
   assert.equal(info.settings.width, 1920); assert.equal(info.settings.height, 1080); assert.equal(info.settings.frameRate, 30);
-  assert.ok(info.devices.includes('OBS Virtual Camera')); assert.ok(info.devices.includes('Remote Meeting Camera Windows Virtual Camera'));
+  assert.ok(info.devices.includes('OBS Virtual Camera')); assert.ok(info.devices.includes(stack.local.hostStatus().virtualCamera.device));
   const sample = (color, pip = false) => receiver.page.waitForFunction(({ color, pip }) => {
     const video = document.querySelector('#virtual-receiver'), canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
     const ctx = canvas.getContext('2d'); ctx.drawImage(video, 1920 * (pip ? 0.78 : 0.5), 1080 * (pip ? 0.84 : 0.5), 1, 1, 0, 0, 1, 1);

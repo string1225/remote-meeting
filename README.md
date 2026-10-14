@@ -1,6 +1,6 @@
 # 同屏 · 钉钉摄像头控制
 
-Windows 本地服务原生采集 USB 主摄像头和笔记本前置摄像头，合成为 **1920×1080、30 fps** 的独立系统摄像头 **Remote Meeting Camera Windows Virtual Camera**。USB 铺满画面，笔记本摄像头固定在右下角。远端登录 [控制网页](https://home.sunny-string.cn/meeting/) 后自动启动本地虚拟输出，只控制摄像头开关、USB 数字缩放和位置。画面与声音由钉钉会议传输。
+Windows 本地服务原生采集 USB 主摄像头和笔记本前置摄像头，合成为 **1920×1080、30 fps** 的独立系统摄像头 **Remote Meeting Camera (Windows 虚拟摄像头)**。USB 铺满画面，笔记本摄像头固定在右下角。远端登录 [控制网页](https://home.sunny-string.cn/meeting/) 后自动启动本地虚拟输出，只控制摄像头开关、USB 数字缩放和位置。画面与声音由钉钉会议传输。
 
 ```text
 USB 摄像头 ≤1920×1080/30 ── 缩放、移动 ──┐
@@ -15,12 +15,12 @@ OBS ── 自己的场景 ── OBS Virtual Camera（独立设备）
 
 1. 本机保持开机、联网、已登录 Windows 且不休眠。启动常驻程序后默认显示人员配置；本地也可切换摄像头视图，手动开启输出。
 2. 远端使用账号和密钥登录，控制面板自动连接主机并启动虚拟摄像头，最多两位远端同时控制。
-3. 在本地钉钉会议的摄像头设置中选择 **Remote Meeting Camera Windows Virtual Camera**，麦克风在钉钉中另行选择。新增设备后，已经打开的会议软件可能需要重新启动以刷新列表。
+3. 在本地钉钉会议的摄像头设置中选择 **Remote Meeting Camera (Windows 虚拟摄像头)**，麦克风在钉钉中另行选择。新增设备后，已经打开的会议软件可能需要重新启动以刷新列表。
 4. 用方向按钮、＋ / −、全景复位、缩放滑块或定位框控制 USB 的 1–8× 数字缩放及裁剪位置。两位远端同步显示控制状态，笔记本画中画保持固定。
 5. 在本地或远端点击“关闭摄像头”，停止原生进程并释放两路原摄像头，其他软件可直接使用原设备。启动中可在本地取消。
 6. 远端离开、控制连接短暂中断、暂停远端控制或重新打开本地控制窗口，已有虚拟输出继续保持。明确关闭后，同一个控制会话刷新或断线重连不会自行重启；新登录并建立的新控制会话会自动启动。
 
-**Remote Meeting Camera** 使用 Windows 11 的 [MFCreateVirtualCamera](https://learn.microsoft.com/en-us/windows/win32/api/mfvirtualcamera/nf-mfvirtualcamera-mfcreatevirtualcamera) 注册原生软件摄像头。Windows 自动为名称添加 **Windows Virtual Camera** 后缀。自己的媒体源由 Windows Frame Server 加载，提供 NV12 / YUY2，支持 Media Foundation、WinRT 和 DirectShow 的系统枚举路径。设备对当前桌面用户发布，并持久保留；停止本地采集时输出黑帧并释放原摄像头。OBS 的设备仍独立。
+**Remote Meeting Camera** 使用 Windows 11 的 [MFCreateVirtualCamera](https://learn.microsoft.com/en-us/windows/win32/api/mfvirtualcamera/nf-mfvirtualcamera-mfcreatevirtualcamera) 注册原生软件摄像头。Windows 自动按系统语言为名称添加虚拟摄像头后缀，中文系统显示 **(Windows 虚拟摄像头)**，英文系统显示 **(Windows Virtual Camera)**。自己的媒体源由 Windows Frame Server 加载，提供 NV12 / YUY2，支持 Media Foundation、WinRT 和 DirectShow 的系统枚举路径。设备对当前桌面用户发布，并持久保留；停止本地采集时输出黑帧并释放原摄像头。OBS 的设备仍独立。
 
 ## 本地采集与性能
 

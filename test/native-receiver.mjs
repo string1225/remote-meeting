@@ -14,7 +14,7 @@ export async function nativeReceiver() {
 export async function openVirtual(page) {
   return page.evaluate(async () => {
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const camera = devices.find(d => d.kind === 'videoinput' && d.label.startsWith('Remote Meeting Camera') && d.label.includes('Windows Virtual Camera'));
+    const camera = devices.find(d => d.kind === 'videoinput' && d.label.startsWith('Remote Meeting Camera') && /Windows.*(?:Camera|摄像头)/i.test(d.label));
     if (!camera) throw new Error('Independent virtual camera is not registered: ' + devices.map(d => d.label).join(', '));
     const video = document.createElement('video'); video.id = 'virtual-receiver'; video.muted = true; video.playsInline = true;
     video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: camera.deviceId }, width: { exact: 1920 }, height: { exact: 1080 }, frameRate: { ideal: 30, max: 30 } }, audio: false });

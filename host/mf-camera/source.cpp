@@ -360,7 +360,8 @@ class Activate final : public RuntimeClass<RuntimeClassFlags<ClassicCom>,ChainIn
     ComPtr<MediaSource> source;
     std::mutex mutex;
 public:
-    ~Activate(){ShutdownObject();}
+    // Releasing the activation object must not stop a source retained by Frame
+    // Server. The caller owns explicit ShutdownObject / media-source Shutdown.
     HRESULT Initialize(){return MFCreateAttributes(&attributes,16);}
     STDMETHODIMP ActivateObject(REFIID iid,void** out) override {std::lock_guard<std::mutex> lock(mutex);if(!out)return E_POINTER;*out=nullptr;if(!source){source=Make<MediaSource>();if(!source)return E_OUTOFMEMORY;HRESULT hr=source->Initialize(attributes.Get());if(FAILED(hr)){source->Shutdown();source.Reset();return hr;}}return source->QueryInterface(iid,out);}
     STDMETHODIMP ShutdownObject() override {std::lock_guard<std::mutex> lock(mutex);if(source)source->Shutdown();source.Reset();return S_OK;}

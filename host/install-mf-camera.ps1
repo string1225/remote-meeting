@@ -86,4 +86,4 @@ foreach($view in @([Microsoft.Win32.RegistryView]::Registry64,[Microsoft.Win32.R
     }
   }finally{$root.Dispose()}
 }
-Write-Output 'Ready. Reopen camera settings and choose Remote Meeting Camera Windows Virtual Camera.'
+Write-Output 'Ready. Reopen camera settings and choose the Remote Meeting Camera Windows virtual-camera device (suffix follows the Windows language).'
