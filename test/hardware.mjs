@@ -1,15 +1,15 @@
-// Opt-in native hardware acceptance. No real camera images are saved or uploaded.
+// Opt-in native hardware acceptance. Real media remains in the local test stack; no images are saved.
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { localStack, launchOptions, remotePage, connectRemote, setView, noWebMedia } from './browser-fixture.mjs';
+import { localStack, mediaLaunchOptions, remotePage, connectRemote, setView, duplex } from './browser-fixture.mjs';
 import { nativeReceiver, openVirtual, stopVirtual } from './native-receiver.mjs';
-const stack = await localStack({ hardware: true }), browser = await chromium.launch(launchOptions);
+const stack = await localStack({ hardware: true }), browser = await chromium.launch(mediaLaunchOptions);
 let receiver;
 try {
   const remote = await remotePage(browser, stack.errors); await connectRemote(remote, stack.url, stack.password);
   await stack.host.waitForFunction(() => window.hostDiagnostics().virtualCamera.state === 'ready', null, { timeout: 40000 });
   const status = stack.local.hostStatus();
-  assert.equal(status.cameras.length, 2); assert.equal(status.microphone, false);
+  assert.equal(status.cameras.length, 2);
   assert.deepEqual(status.output, { width: 1920, height: 1080, fps: 30 });
   const [usb, pip] = status.cameras;
   assert.ok(usb.width <= 1920 && usb.height <= 1080 && usb.frameRate <= 30.01);
@@ -22,7 +22,7 @@ try {
   // Observe output after the receiver has opened; producer frame rate is distinct from device mode.
   await receiver.page.waitForTimeout(6000);
   console.log(JSON.stringify({ cameras: status.cameras, output: status.output, device: info.settings, measuredFps: stack.local.hostStatus().virtualCamera.measuredFps }));
-  for (const page of [stack.host, remote]) assert.deepEqual(await noWebMedia(page), { requests: 0, peers: 0, elements: 0, jsonOnly: true });
+  assert.equal(await remote.evaluate(() => window.testPeers.length), 0);
   await stack.host.locator('#view-cameras').click(); await stack.host.locator('#local-camera-toggle').click();
   await stack.host.waitForFunction(() => window.hostDiagnostics().virtualCamera.state === 'stopped'); await stopVirtual(receiver.page);
   const reopened = await receiver.page.evaluate(async () => {
@@ -38,6 +38,6 @@ try {
   });
   assert.equal(reopened.length, 2); assert.ok(reopened.every(camera => camera.state === 'live'));
   assert.equal(stack.local.hostStatus().peers.length, 1); assert.deepEqual(stack.errors, []);
-  console.log('PASS: actual native USB and Surface capture; independent 1080p/30 virtual-camera mode; remote login/start/zoom, no web media, and local close allows another app to reacquire both original cameras while control remains connected.');
+  console.log('PASS: actual native USB and Surface capture; independent 1080p/30 virtual-camera mode; remote login/start/zoom, web media, and local close allows another app to reacquire both original cameras while control remains connected.');
 } catch (error) { console.error(stack.local.hostStatus()); throw error; }
 finally { await receiver?.close(); await browser.close(); await stack.close(); }

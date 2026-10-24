@@ -8,6 +8,7 @@ import { authenticateAgent } from './agent-auth.js';
 const token = () => randomBytes(24).toString('base64url');
 const split = value => (value || '').split(',').map(v => v.trim()).filter(Boolean);
 const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/remote.js', ['remote.js', 'text/javascript']], ['/accounts.js', ['accounts.js', 'text/javascript']], ['/crop-controls.js', ['crop-controls.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']], ['/control.css', ['control.css', 'text/css']]]);
+for (const [path, type] of [['relay.js', 'text/javascript'], ['media.js', 'text/javascript'], ['meeting.css', 'text/css'], ['audio-meter.js', 'text/javascript'], ['audio-meter.css', 'text/css'], ['playback-controls.js', 'text/javascript']]) assets.set('/' + path, [path, type]);
 
 export function createMeetingServer(options = {}) {
   const env = { ...process.env, ...options };
@@ -64,11 +65,11 @@ export function createMeetingServer(options = {}) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=()');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'none'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'self' blob:; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
     try {
       const path = new URL(req.url, 'http://localhost').pathname;
-      if (req.method === 'GET' && path === '/api/health') return json(res, 200, { status: 'ok', mode: 'control-only' });
+      if (req.method === 'GET' && path === '/api/health') return json(res, 200, { status: 'ok', mode: 'web-meeting', transport: 'wss-relay' });
       // Machine-authenticated management is scoped to remote accounts. The key
       // stays in the local Node service; browser sessions cannot use this route.
       if (path === '/api/agent/users' || path.startsWith('/api/agent/users/')) {

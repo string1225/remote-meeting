@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { randomInt } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
+import { mediaLaunchOptions } from './browser-fixture.mjs';
 import { createMeetingServer } from '../server/app.js';
 import { WebSocket } from 'ws';
 
@@ -14,8 +15,8 @@ let mockHost;
 if (server) { mockHost = new WebSocket(new URL('agent', url).href.replace('http:', 'ws:'), { headers: { Authorization: 'Bearer account-test-machine-key-at-least-32-chars' } }); await once(mockHost, 'open'); }
 const username = `test_${Date.now().toString(36)}`;
 const hostPassword = String(randomInt(10000000, 100000000)), newPassword = String(randomInt(10000000, 100000000));
-const browser = await chromium.launch({ ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true });
-const context = await browser.newContext();
+const browser = await chromium.launch(mediaLaunchOptions);
+const context = await browser.newContext({ permissions: ['camera', 'microphone'] });
 const admin = await context.newPage();
 const errors = [];
 admin.on('pageerror', error => errors.push(error.message));
@@ -37,7 +38,7 @@ try {
   await admin.setViewportSize({ width: 390, height: 844 });
   assert.equal(await admin.evaluate(() => document.querySelector('#users-dialog').scrollWidth <= document.querySelector('#users-dialog').clientWidth), true);
   await admin.screenshot({ path: 'test-results/accounts-mobile.png', fullPage: true });
-  const guestContext = await browser.newContext();
+  const guestContext = await browser.newContext({ permissions: ['camera', 'microphone'] });
   const host = await guestContext.newPage();
   host.on('pageerror', error => errors.push(error.message));
   await host.goto(url);
@@ -47,7 +48,7 @@ try {
   await host.locator('#signed-in').waitFor();
   assert.equal(await host.locator('#manage-users').isVisible(), false);
   await host.reload(); await host.locator('#signed-in').waitFor();
-  await host.waitForFunction(() => document.querySelector('#signal-status').textContent.includes('在线'));
+  await host.waitForFunction(() => document.querySelector('#signal-status').textContent.includes('已接入'));
   await row.locator('[data-action=reset]').click();
   await admin.locator('#reset-password').fill(newPassword);
   await admin.locator('#reset-user-form button[type=submit]').click();

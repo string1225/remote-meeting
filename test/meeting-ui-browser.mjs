@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
-import { localStack, launchOptions, remotePage, connectRemote, noWebMedia } from './browser-fixture.mjs';
-const stack = await localStack(), browser = await chromium.launch(launchOptions);
+import { localStack, mediaLaunchOptions, remotePage, connectRemote, duplex } from './browser-fixture.mjs';
+const stack = await localStack(), browser = await chromium.launch(mediaLaunchOptions);
 try {
   await mkdir('test-results', { recursive: true });
   const page = await remotePage(browser, stack.errors); await connectRemote(page, stack.url, stack.password);
   await page.waitForFunction(() => !document.querySelector('.crop-controls input').disabled);
+  await duplex(page); await duplex(stack.host, true);
   const overlay = page.locator('.crop-overlay');
   const hostView = expected => stack.host.waitForFunction(expected => {
     const view = window.hostDiagnostics().view; return Object.entries(expected).every(([key, value]) => Math.abs(view[key] - value) < 0.01);
@@ -21,6 +22,9 @@ try {
     await overlay.getByRole('button', { name: '全景复位' }).click(); await hostView({ zoom: 1 });
   }
   await page.screenshot({ path: 'test-results/control-mobile.png', fullPage: true });
+  await page.locator('#host-fullscreen').click(); assert.equal(await page.evaluate(() => document.querySelector('#host-stage').getBoundingClientRect().width === innerWidth), true); await page.keyboard.press('Escape');
+  await stack.host.locator('.remote-person button').click(); assert.equal(await stack.host.locator('.is-page-fullscreen').count(), 1); await stack.host.keyboard.press('Escape');
+  await stack.host.locator('#view-settings').click();
   await stack.host.locator('#remote-name').fill('未保存的配置草稿');
   await stack.host.locator('#view-cameras').click(); await stack.host.screenshot({ path: 'test-results/native-host.png', fullPage: true });
   await stack.host.locator('#view-settings').click(); assert.equal(await stack.host.locator('#remote-name').inputValue(), '未保存的配置草稿');
@@ -39,7 +43,7 @@ try {
     await new Promise(resolve => setTimeout(resolve, 1600)); control.dispose(); return { ignoredOldAck, applied, sent };
   });
   assert.deepEqual(retry, { ignoredOldAck: true, applied: true, sent: 2 });
-  assert.deepEqual(await noWebMedia(page), { requests: 0, peers: 0, elements: 0, jsonOnly: true });
+
   assert.deepEqual(stack.errors, []);
-  console.log('PASS: desktop and 320/390px control-only layouts; pan/zoom/reset buttons; delayed acknowledgments preserve latest edits; local settings drafts survive switching views; no camera content or audio UI.');
+  console.log('PASS: desktop and 320/390px duplex meeting layouts, in-page fullscreen/ESC at both ends, pan/zoom/reset, delayed acknowledgements and settings drafts.');
 } finally { await browser.close(); await stack.close(); }

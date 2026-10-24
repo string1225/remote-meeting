@@ -1,31 +1,33 @@
-# 同屏 · 钉钉摄像头控制
+# 同屏 · 双向网页会议
 
-Windows 本地服务原生采集 USB 主摄像头和笔记本前置摄像头，合成为 **1920×1080、30 fps** 的独立系统摄像头 **Remote Meeting Camera (Windows 虚拟摄像头)**。USB 铺满画面，笔记本摄像头固定在右下角。远端登录 [控制网页](https://home.sunny-string.cn/meeting/) 后自动启动本地虚拟输出，只控制摄像头开关、USB 数字缩放和位置。画面与声音由钉钉会议传输。
+Windows 本地采集 USB 和笔记本摄像头，合成 **1920×1080、30 fps** 画面。USB 主画面左右镜像，笔记本画中画固定右下角。远端登录 [会议网页](https://home.sunny-string.cn/meeting/) 后，可启动、关闭和控制摄像头，同时与现场双向通话；现场窗口同步显示每位远端的画面和声音。
 
 ```text
-USB 摄像头 ≤1920×1080/30 ── 缩放、移动 ──┐
-笔记本摄像头 ≤640×480/30 ── 固定右下角 ──┴─ 本地原生合成 → Remote Meeting Camera → 钉钉
-远端网页 ── HTTPS/WSS：登录、开关、缩放、位置 ── 本地服务
-OBS ── 自己的场景 ── OBS Virtual Camera（独立设备）
+USB + 笔记本 → 原生合成 → 本地网页：一路视频 + 麦克风
+                                  ⇅ HTTPS/WSS 443
+                     139.224.12.141：认证、控制、音视频转发
+                                  ⇅ HTTPS/WSS 443
+                         远端网页：视频 + 麦克风
 ```
 
-本地和远端网页都不申请摄像头或麦克风，不显示摄像头画面，不创建 WebRTC 连接，不传输音视频帧。云端仅处理账号、控制连接和少量状态 JSON。页面同时通过 Permissions-Policy 禁用摄像头和麦克风权限。
+两端媒体统一经 139 中转，无点对点连接，不需要开放额外 TURN 端口。本地浏览器读取已有的合成虚拟设备，只编码一路，再由服务器转发给最多两位远端。音视频合并编码保持同步，浏览器通过 MediaSource 播放。服务器不录制或保存媒体，只保留有界的实时发送缓冲。
 
 ## 使用
 
-1. 本机保持开机、联网、已登录 Windows 且不休眠。启动常驻程序后默认显示人员配置；本地也可切换摄像头视图，手动开启输出。
-2. 远端使用账号和密钥登录，控制面板自动连接主机并启动虚拟摄像头，最多两位远端同时控制。
-3. 在本地钉钉会议的摄像头设置中选择 **Remote Meeting Camera (Windows 虚拟摄像头)**，麦克风在钉钉中另行选择。新增设备后，已经打开的会议软件可能需要重新启动以刷新列表。
-4. 用方向按钮、＋ / −、全景复位、缩放滑块或定位框控制 USB 的 1–8× 数字缩放及裁剪位置。两位远端同步显示控制状态，笔记本画中画保持固定。
-5. 在本地或远端点击“关闭摄像头”，停止原生进程并释放两路原摄像头，其他软件可直接使用原设备。启动中可在本地取消。
-6. 远端离开、控制连接短暂中断、暂停远端控制或重新打开本地控制窗口，已有虚拟输出继续保持。明确关闭后，同一个控制会话刷新或断线重连不会自行重启；新登录并建立的新控制会话会自动启动。
+1. 本机保持开机、联网、已登录 Windows 且不休眠。常驻程序打开现场窗口，可切换摄像头视图和人员配置。
+2. 远端用账号和密钥登录，自动接入现场并启动合成摄像头。首次使用允许摄像头、麦克风权限；拒绝权限仍可接收现场画面和声音。
+3. 远端画面出现在现场窗口，现场合成画面出现在远端网页。两边可关闭自己的麦克风、静音接收声音；若浏览器拦截自动播放，点击“播放远端声音”。远端可单独关闭自己的摄像头。
+4. 用方向按钮、＋ / −、全景复位、缩放滑块或定位框控制 USB 的 1–8× 数字缩放及裁剪位置。两位远端控制状态同步，画中画固定右下角。
+5. 点击视频上的“网页内全屏”，画面铺满当前网页；再次点击或按 Esc 退出。现场的远端视频同样支持此操作。
+6. 本地或远端点击“关闭摄像头”会释放两只原摄像头，声音通话继续。明确关闭后，同一控制会话刷新或重连不会自行重启；新建立的控制会话会自动启动。所有远端离开后，现场麦克风停止，已开启的本地合成继续保持。
+7. “暂停远端接入”断开云端媒体和控制，恢复后自动重连。支持新版 Edge / Chrome；手机浏览器需支持 MediaRecorder 与相应 MediaSource 格式。
 
 **Remote Meeting Camera** 使用 Windows 11 的 [MFCreateVirtualCamera](https://learn.microsoft.com/en-us/windows/win32/api/mfvirtualcamera/nf-mfvirtualcamera-mfcreatevirtualcamera) 注册原生软件摄像头。Windows 自动按系统语言为名称添加虚拟摄像头后缀，中文系统显示 **(Windows 虚拟摄像头)**，英文系统显示 **(Windows Virtual Camera)**。自己的媒体源由 Windows Frame Server 加载，提供 NV12 / YUY2，支持 Media Foundation、WinRT 和 DirectShow 的系统枚举路径。设备对当前桌面用户发布，并持久保留；停止本地采集时输出黑帧并释放原摄像头。OBS 的设备仍独立。
 
 ## 本地采集与性能
 
 - 默认合成输出 1920×1080 / 30 fps；USB 采集上限为 1920×1080 / 30，笔记本上限为 640×480 / 30，拒绝驱动返回更大的采集尺寸。
-- OpenCV / DirectShow 采集，每只摄像头只保留最新一帧；原生 NumPy / OpenCV 合成后转换为 NV12，写入受 ACL 保护的本机最新帧文件映射，由 Windows Frame Server 只读采样。没有浏览器画布、浏览器编码或 WebSocket 图像搬运。
+- OpenCV / DirectShow 采集，每只摄像头只保留最新一帧；原生 NumPy / OpenCV 合成后转换为 NV12，写入受 ACL 保护的本机最新帧文件映射，由 Windows Frame Server 只读采样。浏览器读取合成设备后用 MediaRecorder 编码，默认现场 VP8 + Opus 约 2.5 Mbps 视频 / 48 kbps 音频，远端画面上限 640×480 / 15 fps、约 600 kbps。增加远端不会增加现场编码器数量。
 - 输出采用绝对时间节拍，目标及生产上限为 30 fps；状态中的 `virtualCamera.measuredFps` 是实际送帧速率，受硬件负载影响。
 - USB 主画面左右镜像，缩放与定位使用镜像后的画面坐标；画中画保持自身方向，叠加在最终输出的右下角。两路按比例裁剪，不拉伸。画中画宽约 26%，右、下边距分别约为输出宽、高的 2%。数字变焦不增加传感器细节。
 - 自动选取 USB / PC Camera 和笔记本前置设备，排除红外及虚拟摄像头。`cameras` 可明确指定主画面、画中画顺序，兼容浏览器设备名末尾的 VID:PID。
@@ -64,7 +66,7 @@ node host/index.js
 
 共享帧文件位于 ProgramData 的专用目录，只允许本用户写入、Windows 服务读取，始终覆盖最新一帧，不累积录制。正常停止会清零像素；异常退出超过两秒后媒体源自动输出黑帧。若提示 PC Camera 无法打开，先停止 OBS、钉钉等应用对该原摄像头的使用，钉钉应选择合成虚拟设备。
 
-配置：`serverUrl` 为云端 `/meeting/` 地址；`agentKey` 与云端 `HOST_AGENT_KEY` 相同；`output` 默认 `{ "width": 1920, "fps": 30 }`；`virtualCamera.enabled` 默认 true，`pythonPath` 默认 `.local/virtual-camera/Scripts/python.exe`；`headless: false` 显示控制窗口。旧的 microphone / idleMs 字段不再使用。
+配置：`serverUrl` 为云端 `/meeting/` 地址；`agentKey` 与云端 `HOST_AGENT_KEY` 相同；`output` 默认 `{ "width": 1920, "fps": 30 }`；`virtualCamera.enabled` 默认 true，`pythonPath` 默认 `.local/virtual-camera/Scripts/python.exe`；`headless: false` 显示控制窗口。`microphone` 可按设备名称指定现场麦克风，未配置时使用系统默认输入；旧的 idleMs 字段不再使用。
 
 当前用户登录后自动启动：
 
@@ -72,13 +74,13 @@ node host/index.js
 powershell -NoProfile -ExecutionPolicy Bypass -File host/install.ps1
 ```
 
-安装器创建当前用户 Startup 目录的 `Remote Meeting Host.lnk`。隐藏监督进程运行本地服务，意外退出后恢复；本地可见窗口只负责控制和人员配置，关闭窗口不会中断原生输出，窗口会自动恢复。
+安装器创建当前用户 Startup 目录的 `Remote Meeting Host.lnk`。隐藏监督进程运行本地服务，意外退出后恢复；本地可见窗口负责音视频播放、编码、控制和人员配置。关闭窗口时原生合成继续保持，网页通话在窗口自动恢复后重建。
 
 本地监听 `127.0.0.1:3034`；检查 `http://127.0.0.1:3034/api/status`，日志 `.local/host.log`。暂停按钮仅暂停远端控制。取消自动启动时仅删除本服务的专用快捷方式。
 
 ## 云端部署
 
-复用阿里云 Nginx、HTTPS 域名和证书，地址为 `https://home.sunny-string.cn/meeting/`。云端 Node 仅监听 `127.0.0.1:3033`，本机主动建立 WSS 控制连接，无需对 Windows 开放入站端口。无需 STUN、TURN 或媒体中继。
+复用阿里云 Nginx、HTTPS 域名和证书，地址为 `https://home.sunny-string.cn/meeting/`。云端 Node 仅监听 `127.0.0.1:3033`，本机主动建立独立的 WSS 控制和媒体连接，无需对 Windows 开放入站端口。媒体也由此服务器通过现有 443 端口转发。
 
 ```sh
 git archive --format=tar.gz --output=release.tar.gz HEAD
@@ -88,7 +90,7 @@ ssh -T aliyun-remote-meeting 'mkdir -p /opt/remote-meeting/releases/<sha>; tar -
 
 部署只更新 `remote-meeting` 服务和已有 HTTPS 站点的 `/meeting/` include。配置 `/etc/remote-meeting.env` 仅 root 可读；账号文件 `/var/lib/remote-meeting/users.json` 位于发布目录外。`/opt/remote-meeting/current` 指向已提交版本，旧发布保留，健康检查失败会回滚。
 
-发布重启云端会使内存登录与控制连接失效，远端重新登录即可。本机主动重连，原生虚拟输出不依赖云端连接。健康接口返回 `{"status":"ok","mode":"control-only"}`。
+发布重启云端会使内存登录与控制连接失效，远端重新登录即可。本机主动重连，原生虚拟输出不依赖云端连接。健康接口返回 `{"status":"ok","mode":"web-meeting","transport":"wss-relay"}`。
 
 本地开发云端：复制 `.env.example` 到 `.env`，设置管理员初始密钥和随机机器凭据，运行 `npm start`；本机配置使用同一个开发 URL。`BOOTSTRAP_ADMIN_PASSWORD` 只在账号文件不存在时初始化，后续通过界面改口令。
 
@@ -108,9 +110,9 @@ node test/virtual-camera-browser.mjs
 node test/hardware.mjs
 ```
 
-可用 `BROWSER_PATH` 指定已安装 Edge。默认浏览器回归禁止并记录摄像头 / 麦克风枚举、采集与 PeerConnection，验证纯 JSON 控制、自动启动、两位远端同步、重连、失败重试、关闭及账号权限。UI 回归覆盖桌面、320 / 390 px 手机布局、方向 / 缩放 / 复位及草稿保留，截图仅保存到忽略的 `test-results/`。
+可用 `BROWSER_PATH` 指定已安装 Edge。默认浏览器回归使用合成摄像头和测试音频，验证双向解码画面、播放音量、两位远端控制、重连、失败重试、关闭和账号权限；服务器回归验证媒体身份绑定、角色隔离、退出撤销和帧大小限制。UI 回归覆盖网页内全屏 / Esc、桌面、320 / 390 px 手机布局、方向 / 缩放 / 复位及草稿保留；仅测试图像保存到忽略的 `test-results/`。
 
-原生单元测试验证设备选择、实际合成像素、固定画中画、裁剪边界和失败释放。Media Foundation 验收跨进程检查六种格式、送帧与过期黑帧，驱动验收使用颜色测试源，由独立本地接收程序读取 Remote Meeting Camera，验证 1080p/30 模式及实际控制效果。硬件验收会开启真实 USB 和 Surface，检查实际采集尺寸及帧率、本地关闭后另一程序重新打开两只原设备；不保存或上传真实摄像头画面。
+原生单元测试验证设备选择、实际合成像素、固定画中画、裁剪边界和失败释放。Media Foundation 验收跨进程检查六种格式、送帧与过期黑帧，驱动验收使用颜色测试源，由独立本地接收程序读取 Remote Meeting Camera，验证 1080p/30 模式及实际控制效果。硬件验收会开启真实 USB 和 Surface，检查实际采集尺寸及帧率、本地关闭后另一程序重新打开两只原设备；不保存真实摄像头画面；公网验收会通过授权的 139 会议中转发送现场媒体。
 
 ## SSH / Codex
 

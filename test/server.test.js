@@ -11,10 +11,10 @@ async function fixture(t, options = {}) {
   const url = `http://127.0.0.1:${server.address().port}`;
   const request = (path, method = 'GET', data, cookie = '', origin = url) => fetch(`${url}/api/${path}`, { method, headers: { Origin: origin, Cookie: cookie, 'Content-Type': 'application/json' }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   const login = (username = 'admin', secret = password) => request('login', 'POST', { username, password: secret });
-  async function client({ agent = false, cookie = '', ticket, key = agentKey, origin = url } = {}) {
-    const ws = new WebSocket(url.replace('http:', 'ws:') + (agent ? '/agent' : '/ws'), { origin, headers: agent ? { Authorization: `Bearer ${key}` } : { Cookie: cookie } });
+  async function client({ agent = false, media = false, cookie = '', ticket, key = agentKey, origin = url } = {}) {
+    const ws = new WebSocket(url.replace('http:', 'ws:') + (media ? agent ? '/agent-media' : '/media' : agent ? '/agent' : '/ws'), { origin, headers: agent ? { Authorization: `Bearer ${key}` } : { Cookie: cookie } });
     const inbox = [], waiters = [];
-    ws.on('message', raw => { const m = JSON.parse(raw); const i = waiters.findIndex(w => w.type === m.type); if (i >= 0) { const [w] = waiters.splice(i, 1); clearTimeout(w.timer); w.resolve(m); } else inbox.push(m); });
+    ws.on('message', (raw, binary) => { const m = binary ? { type: 'binary', raw } : JSON.parse(raw); const i = waiters.findIndex(w => w.type === m.type); if (i >= 0) { const [w] = waiters.splice(i, 1); clearTimeout(w.timer); w.resolve(m); } else inbox.push(m); });
     const next = type => { const i = inbox.findIndex(m => m.type === type); if (i >= 0) return Promise.resolve(inbox.splice(i, 1)[0]); return new Promise((resolve, reject) => { waiters.push({ type, resolve, timer: setTimeout(() => reject(new Error(`Missing ${type}`)), 2500) }); }); };
     await once(ws, 'open');
     const send = m => ws.send(JSON.stringify(m)); if (ticket) send({ type: 'join', ticket });
@@ -56,7 +56,7 @@ test('two authenticated control panels, isolated tickets and validated camera co
   ar.send({ type: 'control', data: { type: 'viewport', camera: 0, zoom: 2, x: 0, y: 1, media: 'ignored' } });
   const command = await host.next('control'); assert.equal(command.from, aj.self.id);
   assert.deepEqual(command.data, { type: 'viewport', camera: 0, zoom: 2, x: 0.25, y: 0.75 });
-  assert.equal(aj.iceServers, undefined);
+  assert.equal(aj.mediaTransport, 'wss-relay');
   host.send({ type: 'host-state', state: 'capturing', cameras: [{ width: 3840, height: 2160, label: 'Camera 1' }] });
   assert.equal((await ar.next('host-state')).cameras[0].width, 3840);
   ar.send({ type: 'host-state', state: 'error', message: 'spoofed' });
@@ -104,25 +104,43 @@ test('account roles and password reset disconnect only that user, preserving the
   await f.request('logout', 'POST', undefined, admin); await b.next('ended'); assert.equal((await f.reserve(admin)).status, 401);
 });
 
-test('login throttle and secure scoped cookie; control protocol publishes no ICE/TURN credentials', async t => {
-  const f = await fixture(t, { TRUST_PROXY: 'true', COOKIE_PATH: '/meeting/', TURN_URLS: 'turn:example.com:3478', TURN_SECRET: 'test-turn-secret' });
+test('login throttle and secure scoped cookie; media uses the authenticated web relay', async t => {
+  const f = await fixture(t, { TRUST_PROXY: 'true', COOKIE_PATH: '/meeting/' });
   const response = await fetch(`${f.url}/api/login`, { method: 'POST', headers: { Origin: f.url, 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https' }, body: JSON.stringify({ username: 'admin', password }) });
   assert.match(response.headers.get('set-cookie'), /Path=\/meeting\/; HttpOnly; SameSite=Strict; Max-Age=28800; Secure/);
   const host = await f.client({ agent: true }); const joined = await host.next('joined');
-  assert.equal(joined.iceServers, undefined); assert.equal(JSON.stringify(joined).includes('test-turn-secret'), false);
+  assert.equal(joined.mediaTransport, 'wss-relay');
   for (let i = 0; i < 10; i++) assert.equal((await f.login('admin', 'wrong')).status, 401);
   assert.equal((await f.login()).status, 429);
 });
 
-test('web media permissions and legacy WebRTC routes are disabled; SDP is never relayed', async t => {
-  const f = await fixture(t), host = await f.client({ agent: true }); await host.next('joined');
-  const response = await fetch(f.url);
-  assert.equal(response.headers.get('permissions-policy'), 'camera=(), microphone=()');
-  assert.match(response.headers.get('content-security-policy'), /media-src 'none'/);
-  for (const path of ['rtc.js', 'audio-meter.js', 'playback-controls.js']) assert.equal((await fetch(f.url + '/' + path)).status, 404);
-  const cookie = cookieOf(await f.login()), { ticket } = await (await f.reserve(cookie)).json();
-  const remote = await f.client({ cookie, ticket }); await remote.next('joined');
-  remote.send({ type: 'signal', data: { description: { type: 'offer', sdp: 'v=0' } } });
-  assert.equal((await remote.next('error')).code, 'CONTROLS_ONLY');
-  assert.equal(host.inbox.some(m => m.type === 'signal'), false);
+test('duplex media permissions and live playback assets', async t => {
+  const f = await fixture(t), response = await fetch(f.url);
+  assert.equal(response.headers.get('permissions-policy'), 'camera=(self), microphone=(self)');
+  assert.match(response.headers.get('content-security-policy'), /media-src 'self' blob:/);
+  for (const path of ['relay.js', 'media.js', 'audio-meter.js', 'playback-controls.js']) assert.equal((await fetch(f.url + '/' + path)).status, 200);
+});
+
+test('web media binds to the logged-in control identity, relays only opposite roles and closes on logout', async t => {
+  const f = await fixture(t), host = await f.client({ agent: true }), hj = await host.next('joined');
+  const cookie = cookieOf(await f.login()), otherCookie = cookieOf(await f.login());
+  const { ticket } = await (await f.reserve(cookie)).json(), remote = await f.client({ cookie, ticket }); const rj = await remote.next('joined');
+  await assert.rejects(f.client({ media: true }), /401/);
+  await assert.rejects(f.client({ media: true, agent: true, key: 'bad' }), /401/);
+  const wrong = await f.client({ media: true, cookie: otherCookie, ticket }); const wrongClosed = once(wrong.ws, 'close'); await wrongClosed;
+  const hm = await f.client({ media: true, agent: true }); await hm.next('media-joined');
+  const rm = await f.client({ media: true, cookie, ticket }); await rm.next('media-joined'); await hm.next('media-request');
+  hm.send({ type: 'source-start', mime: 'video/webm;codecs=vp8,opus', video: true, audio: true, source: { id: 'spoof' } });
+  const source = await rm.next('source-start'); assert.equal(source.source.id, hj.self.id); assert.equal(source.epoch, 1);
+  hm.ws.send(Buffer.from([1, 2, 3])); const frame = (await rm.next('binary')).raw;
+  assert.equal(frame.subarray(0, 36).toString(), hj.self.id); assert.equal(frame.readUInt32BE(36), 1); assert.deepEqual([...frame.subarray(40)], [1, 2, 3]);
+  const secondTicket = (await (await f.reserve(otherCookie)).json()).ticket;
+  const other = await f.client({ cookie: otherCookie, ticket: secondTicket }); await other.next('joined');
+  const om = await f.client({ media: true, cookie: otherCookie, ticket: secondTicket }); await om.next('media-joined'); await hm.next('media-request');
+  rm.send({ type: 'source-start', mime: 'audio/webm;codecs=opus', video: false, audio: true }); assert.equal((await hm.next('source-start')).source.id, rj.self.id);
+  rm.ws.send(Buffer.from([9, 8])); assert.equal((await hm.next('binary')).raw.subarray(40).toString('hex'), '0908');
+  assert.equal(om.inbox.some(m => ['binary', 'source-start'].includes(m.type)), false);
+  const closed = once(rm.ws, 'close'); await f.request('logout', 'POST', undefined, cookie); await closed;
+  assert.equal((await hm.next('source-ended')).from, rj.self.id);
+  hm.ws.send(Buffer.alloc(2 * 1024 * 1024 + 1)); await once(hm.ws, 'close');
 });

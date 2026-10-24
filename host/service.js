@@ -6,18 +6,22 @@ import { compositeSettings } from './composite.js';
 import { normalizeView } from './crop.js';
 
 const assets = new Map([['/', ['host/index.html', 'text/html']], ['/host-app.js', ['host/app.js', 'text/javascript']], ['/style.css', ['public/style.css', 'text/css']], ['/host.css', ['host/style.css', 'text/css']], ['/host-accounts.js', ['host/accounts.js', 'text/javascript']]]);
+for (const [path, type] of [['relay.js', 'text/javascript'], ['media.js', 'text/javascript'], ['meeting.css', 'text/css'], ['audio-meter.js', 'text/javascript'], ['audio-meter.css', 'text/css'], ['playback-controls.js', 'text/javascript']]) assets.set('/' + path, ['public/' + path, type]);
 export function createHostService(config, { cameraFactory = createVirtualCamera } = {}) {
   const url = new URL('agent', config.serverUrl);
   if (!['https:', 'http:'].includes(url.protocol) || (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname))) throw new Error('Use an HTTPS cloud URL');
   if (typeof config.agentKey !== 'string' || config.agentKey.length < 32 || config.agentKey.startsWith('replace-')) throw new Error('Missing host agent key');
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   let renderer, cloud, reconnectTimer, attempt = 0, paused = false, stopping = false, remotes = [], cameras = [], view = { zoom: 1, x: 0.5, y: 0.5 }, virtualStatus = { state: 'stopped' };
+  let cloudWelcome, mediaStatus = { video: false, audio: false, error: '' };
+  let rendererMedia, cloudMedia;
+  function closeMedia() { const remote = cloudMedia; cloudMedia = null; remote?.terminate(); const local = rendererMedia; rendererMedia = null; local?.close(); }
   const output = compositeSettings(config.output);
-  const send = (ws, data) => { if (ws?.readyState === WebSocket.OPEN) { if (ws.bufferedAmount > 64 * 1024) ws.close(1008, 'Slow consumer'); else ws.send(JSON.stringify(data)); } };
+  const send = (ws, data) => { if (ws?.readyState === WebSocket.OPEN) { if (ws.bufferedAmount > 256 * 1024) ws.close(1008, 'Slow consumer'); else ws.send(JSON.stringify(data)); } };
   const status = () => ({
     renderer: renderer?.readyState === WebSocket.OPEN, online: cloud?.readyState === WebSocket.OPEN, paused,
     state: virtualStatus.state === 'ready' ? 'capturing' : ['starting', 'stopping'].includes(virtualStatus.state) ? 'starting' : virtualStatus.state === 'error' ? 'error' : 'idle',
-    message: virtualStatus.message || '', capturing: virtualStatus.state === 'ready', microphone: false,
+    message: virtualStatus.message || '', capturing: virtualStatus.state === 'ready', microphone: mediaStatus.audio, media: mediaStatus,
     cameras, output, view: { ...view, camera: 0, shared: true, sourceWidth: cameras[0]?.width || 0, sourceHeight: cameras[0]?.height || 0, outputWidth: output.width, outputHeight: output.height },
     peers: remotes.map(p => ({ id: p.id, name: p.name, state: 'connected' })), virtualCamera: virtualStatus
   });
@@ -32,9 +36,9 @@ export function createHostService(config, { cameraFactory = createVirtualCamera 
   function json(res, status, data) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); }
   const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'none'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'self' blob:; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'");
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=()');
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self)');
     // Local service is loopback-only and rejects DNS rebinding Host headers.
     if (req.headers.host !== `127.0.0.1:${server.address().port}`) { res.writeHead(403); res.end(); return; }
     try {
@@ -73,8 +77,9 @@ export function createHostService(config, { cameraFactory = createVirtualCamera 
   function publish() {
     const current = status();
     send(renderer, { type: 'host-status', ...current });
-    send(cloud, { type: 'host-state', state: current.state, message: current.message, cameras: current.cameras, output: current.output, view: current.view, virtualCamera: current.virtualCamera });
+    send(cloud, { type: 'host-state', state: current.state, message: current.message, cameras: current.cameras, output: current.output, view: current.view, virtualCamera: current.virtualCamera, media: mediaStatus });
   }
+  function mediaConfig() { if (cloudWelcome) send(renderer, { type: 'media-config', ...cloudWelcome, peers: remotes }); }
   function command(data) {
     if (!data || typeof data !== 'object') return;
     if (data.type === 'camera-start') {
@@ -98,50 +103,68 @@ export function createHostService(config, { cameraFactory = createVirtualCamera 
   function connectCloud() {
     clearTimeout(reconnectTimer);
     if (paused || stopping) return;
-    const ws = new WebSocket(url, { headers: { Authorization: 'Bearer ' + config.agentKey }, maxPayload: 8192, handshakeTimeout: 12000 });
+    const ws = new WebSocket(url, { headers: { Authorization: 'Bearer ' + config.agentKey }, maxPayload: 64 * 1024, handshakeTimeout: 12000 });
     cloud = ws;
     ws.on('open', () => { attempt = 0; publish(); });
     ws.on('message', raw => {
       if (ws !== cloud) return;
       try {
         const message = JSON.parse(raw.toString());
-        if (message.type === 'joined') updateRemotes(message.peers);
-        else if (message.type === 'peer-joined') updateRemotes([...remotes.filter(p => p.id !== message.peer.id), message.peer]);
-        else if (message.type === 'peer-left') { remotes = remotes.filter(p => p.id !== message.id); publish(); }
+        if (message.type === 'joined') { cloudWelcome = { self: message.self }; updateRemotes(message.peers); mediaConfig(); }
+        else if (message.type === 'peer-joined') { updateRemotes([...remotes.filter(p => p.id !== message.peer.id), message.peer]); send(renderer, message); }
+        else if (message.type === 'peer-left') { remotes = remotes.filter(p => p.id !== message.id); publish(); send(renderer, message); }
         else if (message.type === 'control') command(message.data);
       } catch { /* Cloud only sends validated JSON controls. */ }
     });
     ws.on('error', () => {});
     ws.on('close', () => {
       if (ws !== cloud) return;
-      cloud = null; remotes = []; publish();
+      cloud = null; cloudWelcome = null; remotes = []; closeMedia(); send(renderer, { type: 'media-disconnected' }); publish();
       reconnectTimer = setTimeout(connectCloud, Math.min(1000 * 2 ** attempt++, 15000));
     });
   }
   function disconnectCloud() {
-    clearTimeout(reconnectTimer); const old = cloud; cloud = null; old?.terminate(); remotes = []; publish();
+    clearTimeout(reconnectTimer); const old = cloud; cloud = null; cloudWelcome = null; old?.terminate(); remotes = []; closeMedia(); send(renderer, { type: 'media-disconnected' }); publish();
   }
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 2048, perMessageDeflate: false });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
+  const mediaWss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024, perMessageDeflate: false });
+  mediaWss.on('connection', ws => {
+    rendererMedia = ws;
+    const mediaUrl = new URL(url); mediaUrl.pathname = mediaUrl.pathname.replace(/agent$/, 'agent-media');
+    const upstream = new WebSocket(mediaUrl, { headers: { Authorization: 'Bearer ' + config.agentKey }, maxPayload: 2 * 1024 * 1024, perMessageDeflate: false }); cloudMedia = upstream;
+    const forward = (target, data, binary) => { if (target.readyState === WebSocket.OPEN) { if (target.bufferedAmount > 3 * 1024 * 1024) target.close(1013, 'Media congestion'); else target.send(data, { binary }); } };
+    ws.on('error', () => {}); upstream.on('error', () => {});
+    ws.on('message', (raw, binary) => forward(upstream, raw, binary)); upstream.on('message', (raw, binary) => forward(ws, raw, binary));
+    ws.on('close', () => { upstream.terminate(); if (rendererMedia === ws) rendererMedia = null; if (cloudMedia === upstream) cloudMedia = null; });
+    upstream.on('close', () => ws.close());
+  });
   server.on('upgrade', (req, socket, head) => {
+    if (req.url === '/media-bridge') {
+      if (req.headers.host !== '127.0.0.1:' + server.address().port || req.headers.origin !== 'http://127.0.0.1:' + server.address().port || rendererMedia || !renderer || cloud?.readyState !== WebSocket.OPEN) { socket.destroy(); return; }
+      mediaWss.handleUpgrade(req, socket, head, ws => mediaWss.emit('connection', ws)); return;
+    }
     if (req.headers.host !== '127.0.0.1:' + server.address().port || req.headers.origin !== 'http://127.0.0.1:' + server.address().port || req.url !== '/bridge' || renderer) { socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws));
   });
   wss.on('connection', ws => {
-    renderer = ws; publish();
+    renderer = ws;
+    send(ws, { type: 'config', config: { microphone: config.microphone || '', output, mediaTest: config.mediaTest === true } });
+    publish(); mediaConfig();
     ws.on('error', () => {});
     ws.on('message', (raw, binary) => {
       try {
         if (binary) { ws.close(1008, 'Controls only'); return; }
         const message = JSON.parse(raw.toString());
         if (message.type === 'control') command(message.data);
+        else if (message.type === 'media-status') { mediaStatus = { video: message.video === true, audio: message.audio === true, error: String(message.error || '').slice(0, 240) }; publish(); }
         else if (message.type === 'bridge-pause') { paused = true; disconnectCloud(); }
         else if (message.type === 'bridge-resume') { paused = false; connectCloud(); publish(); }
       } catch { ws.close(1008, 'Invalid local control'); }
     });
-    ws.on('close', () => { if (renderer === ws) { renderer = null; publish(); } });
+    ws.on('close', () => { if (renderer === ws) { renderer = null; closeMedia(); mediaStatus = { video: false, audio: false, error: '' }; send(cloud, { type: 'media-reset' }); publish(); } });
   });
   server.on('listening', connectCloud);
-  server.shutdown = async () => { stopping = true; disconnectCloud(); renderer?.terminate(); await virtual.stop(); wss.close(); await new Promise(resolve => server.close(resolve)); };
+  server.shutdown = async () => { stopping = true; disconnectCloud(); renderer?.terminate(); closeMedia(); await virtual.stop(); wss.close(); mediaWss.close(); await new Promise(resolve => server.close(resolve)); };
   server.hostStatus = status;
   return server;
 }
