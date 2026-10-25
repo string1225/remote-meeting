@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCRtpSender, RTCSessionDescription, MediaStreamTrack
 from aiortc.sdp import candidate_from_sdp
+from audio_capture import Microphone, OpusPackets, microphones
 
 spec = importlib.util.spec_from_file_location('capture', pathlib.Path(__file__).with_name('virtual-camera.py'))
 capture = importlib.util.module_from_spec(spec)
@@ -124,7 +125,8 @@ class Devices:
                 encoder_errors.append(error); encoder_ready.set()
         try:
             if self.config.get('synthetic'):
-                sources = [capture.SyntheticSource(0), capture.SyntheticSource(1)]
+                names = ['Synthetic camera 0', 'Synthetic camera 1']
+                sources = [capture.SyntheticSource(names.index(name)) for name in self.config.get('cameras') or names]
             else:
                 from pygrabber.dshow_graph import FilterGraph
                 import comtypes
@@ -144,7 +146,8 @@ class Devices:
                 if encoder_errors: raise encoder_errors[0]
                 view, version = self.view.copy(), self.version
                 render_start = time.perf_counter()
-                image = capture.compose(sources[0].latest(), sources[1].latest(), width, height, view)
+                image = capture.compose(sources[0].latest(), sources[1].latest(), width, height, view,
+                                        self.config.get('mirrorMain', False), self.config.get('mirrorSecondary', True))
                 render_ms += (time.perf_counter() - render_start) * 1000
                 if time.monotonic() >= preview_at:
                     import base64
@@ -193,42 +196,48 @@ class Devices:
         self.audio_thread.start()
 
     def audio_loop(self):
-        stream = None
+        source, failed = None, False
         try:
-            codec = av.CodecContext.create('libopus', 'w')
-            codec.sample_rate, codec.layout, codec.format, codec.bit_rate = 48000, 'mono', 's16', 48000
-            codec.time_base = Fraction(1, 48000)
-            codec.options = {'application': 'voip'}
-            codec.open()
-            if not self.config.get('synthetic'):
-                import sounddevice as sd
-                device = self.config.get('microphone') or None
-                hostapis = sd.query_hostapis()
-                wasapi = next((i for i, api in enumerate(hostapis) if api['name'] == 'Windows WASAPI'), None)
-                if wasapi is not None and not device: device = hostapis[wasapi]['default_input_device']
-                stream = sd.RawInputStream(device=device, samplerate=48000, blocksize=960, channels=1, dtype='int16', latency='low')
-                stream.start()
-            emit(type='microphone-state', state='ready')
-            sample = round(time.monotonic() * 48000)
+            if self.config.get('synthetic'):
+                rate, channels, name = 44100, 2, 'Synthetic 440 Hz'
+            else:
+                source = Microphone(self.config.get('microphone') or '')
+                rate, channels, name = source.rate, source.channels, source.info['name']
+                source.start()
+            encoder = OpusPackets(rate, channels)
+            emit(type='microphone-state', state='ready', device=name, captureRate=rate, captureChannels=channels,
+                 encodeRate=48000, rtpClockRate=48000, packetSamples=960, packetDurationMs=20)
+            sample, packets, received = round(time.monotonic() * rate), 0, 0
+            deadline = last = time.monotonic()
+            old_frames, old_packets, latency = 0, 0, 0
             while not self.audio_stop.is_set():
-                if stream:
-                    raw, overflow = stream.read(960)
-                    raw = bytes(raw)
+                if source:
+                    try: raw, frames, pts, captured_at = source.read()
+                    except queue.Empty: continue
+                    latency = (time.monotonic() - captured_at) * 1000
                 else:
-                    t = (np.arange(960) + sample) / 48000
-                    raw = (np.sin(t * 2 * math.pi * 440) * 4000).astype(np.int16).tobytes()
-                    self.audio_stop.wait(0.02)
-                frame = av.AudioFrame(format='s16', layout='mono', samples=960)
-                frame.planes[0].update(raw)
-                frame.sample_rate, frame.pts, frame.time_base = 48000, sample, Fraction(1, 48000)
-                sample += 960
-                for packet in codec.encode(frame):
-                    self.audio.publish(packet)
+                    frames, pts = rate // 100, sample
+                    t = (np.arange(frames) + sample) / rate
+                    mono = (np.sin(t * 2 * math.pi * 440) * 4000).astype(np.int16)
+                    raw = np.repeat(mono[:, None], channels, axis=1).tobytes()
+                    sample += frames; deadline += frames / rate
+                    self.audio_stop.wait(max(0, deadline - time.monotonic()))
+                received += frames
+                for packet in encoder.encode(raw, frames, pts):
+                    self.audio.publish(packet); packets += 1
+                elapsed = time.monotonic() - last
+                if elapsed >= 2:
+                    total = source.frames if source else received
+                    emit(type='audio-metrics', measuredCaptureRate=round((total-old_frames)/elapsed),
+                         packetsPerSecond=round((packets-old_packets)/elapsed, 1), queueDelayMs=round(latency, 1),
+                         droppedFrames=source.dropped if source else 0, overflows=source.overflows if source else 0)
+                    last, old_frames, old_packets = time.monotonic(), total, packets
         except Exception as error:
+            failed = True
             emit(type='microphone-state', state='error', message=str(error))
         finally:
-            if stream: stream.stop(); stream.close()
-            if self.audio_stop.is_set(): emit(type='microphone-state', state='stopped')
+            if source: source.close()
+            if not failed: emit(type='microphone-state', state='stopped')
 
     async def microphone_close(self):
         self.audio_stop.set()
@@ -237,11 +246,28 @@ class Devices:
         emit(type='microphone-state', state='stopped')
 
 
+def device_catalog(config):
+    if config.get('synthetic'):
+        return dict(cameras=['Synthetic camera 0', 'Synthetic camera 1'],
+                    microphones=[dict(id='synthetic-440', name='Synthetic 440 Hz', sampleRate=44100, channels=2, default=True)],
+                    defaultCameras=['Synthetic camera 0', 'Synthetic camera 1'])
+    import comtypes
+    from pygrabber.dshow_graph import FilterGraph
+    comtypes.CoInitialize()
+    try:
+        names = FilterGraph().get_input_devices()
+        eligible = [name for name in names if not capture.re.search(r'\bIR\b|infrared|virtual|obs|unity|remote meeting camera', name, capture.re.I)]
+        try: defaults = [names[i] for i in capture.select_cameras(names, [])]
+        except ValueError: defaults = []
+        return dict(cameras=eligible, microphones=microphones(), defaultCameras=defaults)
+    finally: comtypes.CoUninitialize()
+
+
 async def main():
     config = json.loads(await asyncio.to_thread(sys.stdin.readline))
     cv2.setNumThreads(2)
     devices = Devices(config, asyncio.get_running_loop())
-    peers, tasks = {}, set()
+    peers, tasks, device_lock = {}, set(), asyncio.Lock()
     async def remove(id):
         peer = peers.pop(id, None)
         if peer:
@@ -273,12 +299,29 @@ async def main():
                     candidate = candidate_from_sdp(c['candidate'].removeprefix('candidate:'))
                     candidate.sdpMid, candidate.sdpMLineIndex = c.get('sdpMid'), c.get('sdpMLineIndex')
                     await peers[id].addIceCandidate(candidate)
-            elif kind == 'camera-start': devices.camera_start()
-            elif kind == 'camera-stop': await devices.camera_close()
-            elif kind == 'microphone-start': devices.microphone_start()
-            elif kind == 'microphone-stop': await devices.microphone_close()
+            elif kind == 'devices-list':
+                catalog = await asyncio.to_thread(device_catalog, config)
+                emit(type='devices-list', requestId=message['requestId'], devices=catalog)
+            elif kind in ('camera-start', 'camera-stop', 'microphone-start', 'microphone-stop', 'devices-config'):
+                async with device_lock:
+                    if kind == 'camera-start': devices.camera_start()
+                    elif kind == 'camera-stop': await devices.camera_close()
+                    elif kind == 'microphone-start': devices.microphone_start()
+                    elif kind == 'microphone-stop': await devices.microphone_close()
+                    else:
+                        next_config = message['config']
+                        camera_changed = devices.config.get('cameras') != next_config.get('cameras')
+                        audio_changed = devices.config.get('microphone') != next_config.get('microphone')
+                        restart_camera = camera_changed and devices.camera_thread and devices.camera_thread.is_alive() and not devices.camera_stop.is_set()
+                        restart_audio = audio_changed and devices.audio_thread and devices.audio_thread.is_alive() and not devices.audio_stop.is_set()
+                        if camera_changed: await devices.camera_close()
+                        if audio_changed: await devices.microphone_close()
+                        devices.config.update(next_config)
+                        if restart_camera: devices.camera_start()
+                        if restart_audio: devices.microphone_start()
+                        emit(type='devices-configured', requestId=message['requestId'])
             elif kind == 'viewport': devices.view = capture.normalize(message); devices.version += 1
-        except Exception as error: emit(type='worker-error', id=id, message=str(error))
+        except Exception as error: emit(type='worker-error', id=id, requestId=message.get('requestId'), message=str(error))
 
     emit(type='worker-ready')
     try:

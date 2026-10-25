@@ -25,6 +25,15 @@
 <section id="camera-view" aria-label="摄像头视图" hidden>
 <div class="live-toolbar"><span id="capture-status" role="status">待机 · 摄像头已关闭</span><button id="local-camera-toggle" class="primary" type="button">启动摄像头</button><button id="host-microphone-toggle" class="secondary" type="button">麦克风</button><button id="play-audio" class="secondary" type="button">播放远端声音</button><button id="retry-media" class="secondary" type="button">重新连接画面</button></div>
 <p id="output-settings" class="hint"></p><p id="virtual-camera-status" class="hint"></p><p id="capture-devices" class="hint"></p>
+<details id="device-settings" class="panel device-settings"><summary>本机设备设置 · 摄像头与麦克风</summary>
+<form id="device-form"><fieldset id="device-fields" disabled><div class="device-select-grid">
+<label>主摄像头<select id="main-camera" aria-label="主摄像头"></select></label>
+<label>画中画摄像头<select id="secondary-camera" aria-label="画中画摄像头"></select></label>
+<label>麦克风<select id="microphone-device" aria-label="麦克风"></select></label>
+</div><div class="device-mirrors"><label><input id="mirror-main" type="checkbox">主画面左右镜像</label><label><input id="mirror-secondary" type="checkbox">画中画左右镜像</label></div>
+<div class="account-actions"><button type="submit" id="save-devices" class="primary">保存并应用</button></div></fieldset><button type="button" id="refresh-devices" class="secondary">刷新设备列表</button></form>
+<p id="device-message" class="hint" role="status">展开后读取设备。保存后，仅重启已开启且配置有变化的设备。</p></details>
+<p id="microphone-format" class="hint" role="status">现场话筒已关闭</p>
 <div class="host-meeting-grid"><section class="panel"><div class="panel-heading"><h2>现场合成画面</h2></div><div id="local-stage" class="video-stage"><img id="local-preview" alt="现场合成预览" hidden><p id="local-empty" class="video-empty">远端可启动现场摄像头</p><div class="stage-top"><span>USB 主画面 + 右下角画中画</span><button id="local-fullscreen" class="secondary" type="button">网页内全屏</button></div></div><div id="host-audio"></div></section><section class="panel"><div class="panel-heading"><h2>远端画面</h2></div><p id="remote-empty" class="hint">等待远端开启摄像头和麦克风…</p><div id="remote-media" class="remote-media-grid"></div></section></div>
 <details class="host-connections"><summary>连接状态</summary><div id="participants"></div></details><div id="remote-audio" hidden></div>
 </section>

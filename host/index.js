@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { createHostService } from './service.js';
 
 const config = JSON.parse(await readFile(resolve(process.env.HOST_CONFIG || '.local/host.json'), 'utf8'));
+config.deviceSettingsFile = resolve(config.deviceSettingsFile || '.local/devices.json');
 await mkdir('.local', { recursive: true });
 async function log(message) { const line = `${new Date().toISOString()} ${message}\n`; console.log(line.trim()); await appendFile('.local/host.log', line); }
 const server = createHostService(config);

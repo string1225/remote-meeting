@@ -17,7 +17,8 @@ try {
  await stack.host.waitForFunction(()=>hostMediaStats().some(p=>p.receivedVideo>5&&p.receivedAudio>0&&p.transport==='p2p'));
  assert.deepEqual(await stack.host.evaluate(()=>testMediaRequests),[]);
  await setView(remote,0,2,0.25);await stack.host.waitForFunction(()=>hostDiagnostics().view.zoom===2);
- console.log(JSON.stringify({output:stack.local.hostStatus().output,cameras:stack.local.hostStatus().cameras,encoder:stack.local.hostStatus().virtualCamera,decodedFps:Math.round((after.frames-before.frames)*1000/(after.time-before.time)),media:after.stats}));
+ const audio=stack.local.hostStatus().microphoneStatus;assert.equal(audio.encodeRate,48000);assert.equal(audio.rtpClockRate,48000);assert.equal(audio.packetSamples,960);
+ console.log(JSON.stringify({output:stack.local.hostStatus().output,cameras:stack.local.hostStatus().cameras,encoder:stack.local.hostStatus().virtualCamera,audio,decodedFps:Math.round((after.frames-before.frames)*1000/(after.time-before.time)),media:after.stats}));
  await stack.host.locator('#view-cameras').click();await stack.host.locator('#local-camera-toggle').click();
  await stack.host.waitForFunction(()=>hostDiagnostics().virtualCamera.state==='stopped');assert.equal(stack.local.hostStatus().microphone,true);
  const context=await stack.hostBrowser.newContext({permissions:['camera']});const receiver=await context.newPage();await receiver.goto(stack.url);

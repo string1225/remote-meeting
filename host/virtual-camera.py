@@ -59,17 +59,18 @@ def cover(frame, width, height, view):
     return cv2.resize(region, (width, height), interpolation=cv2.INTER_LINEAR)
 
 
-def compose(main, pip, width, height, view):
-    # View coordinates follow the mirrored USB image; place PIP afterwards so
-    # its orientation and lower-right output anchor stay independent.
-    source_view = dict(view, x=1 - view['x'])
-    output = cv2.flip(cover(main, width, height, source_view), 1)
+def compose(main, pip, width, height, view, mirror_main=True, mirror_pip=False):
+    # Transform each source independently before anchoring PIP in the output.
+    source_view = dict(view, x=1 - view['x']) if mirror_main else view
+    base = cover(main, width, height, source_view)
+    output = cv2.flip(base, 1) if mirror_main else base.copy()
     pw = round(width * 0.26)
     margin_x, margin_y = round(width * 0.02), round(height * 0.02)
     ph = round(pw * 9 / 16)
     x, y = width - pw - margin_x, height - ph - margin_y
     output[y - 2:y + ph + 2, x - 2:x + pw + 2] = 255
-    output[y:y + ph, x:x + pw] = cover(pip, pw, ph, dict(zoom=1, x=0.5, y=0.5))
+    inset = cover(pip, pw, ph, dict(zoom=1, x=0.5, y=0.5))
+    output[y:y + ph, x:x + pw] = cv2.flip(inset, 1) if mirror_pip else inset
     return output
 
 

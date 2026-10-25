@@ -4,8 +4,10 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { createRtcWorker } from './rtc-worker.js';
 import { compositeSettings } from './composite.js';
 import { normalizeView } from './crop.js';
+import { createDeviceSettings, validateDeviceSettings } from './device-settings.js';
 
 const assets = new Map([['/', ['host/index.html', 'text/html']], ['/host-app.js', ['host/app.js', 'text/javascript']], ['/style.css', ['public/style.css', 'text/css']], ['/host.css', ['host/style.css', 'text/css']], ['/host-accounts.js', ['host/accounts.js', 'text/javascript']]]);
+assets.set('/device-controls.js', ['host/device-controls.js', 'text/javascript']);
 for (const [path, type] of [['rtc.js', 'text/javascript'], ['media.js', 'text/javascript'], ['meeting.css', 'text/css'], ['audio-meter.js', 'text/javascript'], ['audio-meter.css', 'text/css'], ['playback-controls.js', 'text/javascript']]) assets.set('/' + path, ['public/' + path, type]);
 export function createHostService(config, { cameraFactory = createRtcWorker } = {}) {
   const url = new URL('agent', config.serverUrl);
@@ -17,6 +19,8 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
   let microphoneStatus = { state: 'stopped' };
   const closeMedia = () => { for (const peer of remotes) virtual.peerRemove?.(peer.id); };
   const output = compositeSettings(config.output);
+  const deviceSettings = createDeviceSettings({ file: config.deviceSettingsFile, fallback: config });
+  let deviceSaving = false;
   const send = (ws, data) => { if (ws?.readyState === WebSocket.OPEN) { if (ws.bufferedAmount > 256 * 1024) ws.close(1008, 'Slow consumer'); else ws.send(JSON.stringify(data)); } };
   const status = () => ({
     renderer: renderer?.readyState === WebSocket.OPEN, online: cloud?.readyState === WebSocket.OPEN, paused,
@@ -25,11 +29,12 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
     cameras, output, view: { ...view, camera: 0, shared: true, sourceWidth: cameras[0]?.width || 0, sourceHeight: cameras[0]?.height || 0, outputWidth: output.width, outputHeight: output.height },
     peers: remotes.map(p => ({ id: p.id, name: p.name, state: 'connected' })), virtualCamera: virtualStatus
   });
-  const virtual = cameraFactory({ ...config.virtualCamera, ...config.rtc, output, cameras: config.cameras || [], microphone: config.microphone || '', synthetic: config.mediaTest === true || config.rtc?.synthetic === true || config.virtualCamera?.synthetic === true }, message => {
+  const virtual = cameraFactory({ ...config.virtualCamera, ...config.rtc, output, ...deviceSettings.value, synthetic: config.mediaTest === true || config.rtc?.synthetic === true || config.virtualCamera?.synthetic === true }, message => {
     if (message.type === 'virtual-camera-state') {
       virtualStatus = message;
       cameras = message.state === 'ready' ? message.cameras || [] : []; mediaStatus.video = message.state === 'ready';
     } else if (message.type === 'microphone-state') { microphoneStatus = message; mediaStatus.audio = message.state === 'ready'; mediaStatus.error = message.state === 'error' ? message.message : ''; }
+    else if (message.type === 'audio-metrics') { microphoneStatus = { ...microphoneStatus, ...message, type: 'microphone-state' }; }
     else if (message.type === 'signal') { send(cloud, message); return; }
     else if (message.type === 'worker-error') { mediaStatus.error = message.message; }
     else if (message.type === 'viewport-applied') view = normalizeView(message);
@@ -45,6 +50,29 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
     // Local service is loopback-only and rejects DNS rebinding Host headers.
     if (req.headers.host !== `127.0.0.1:${server.address().port}`) { res.writeHead(403); res.end(); return; }
     try {
+      if (req.url === '/api/devices' || req.url === '/api/devices/config') {
+        const origin = `http://127.0.0.1:${server.address().port}`;
+        if (req.headers['x-host-console'] !== '1' || req.headers['sec-fetch-site'] === 'cross-site' || req.headers.origin && req.headers.origin !== origin || req.method !== 'GET' && req.headers.origin !== origin) return json(res, 403, { error: '请在本机控制台操作' });
+        if (req.method === 'GET' && req.url === '/api/devices') {
+          try { return json(res, 200, { devices: await virtual.listDevices(), settings: deviceSettings.value, file: deviceSettings.file || '', saving: deviceSaving }); }
+          catch (error) { return json(res, 503, { error: error.message }); }
+        }
+        if (req.method !== 'PUT' || req.url !== '/api/devices/config') return json(res, 405, { error: '不支持的操作' });
+        if (deviceSaving) return json(res, 409, { error: '正在保存另一份设备配置，请稍后重试' });
+        if (req.headers['content-type'] !== 'application/json') return json(res, 415, { error: '请使用 JSON 请求' });
+        deviceSaving = true;
+        try {
+          let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 4096) return json(res, 413, { error: '请求过长' }); }
+          let next; try { next = validateDeviceSettings(JSON.parse(raw)); } catch (error) { return json(res, 400, { error: error.message }); }
+          const catalog = await virtual.listDevices();
+          if (next.cameras.some(name => !catalog.cameras.includes(name)) || next.microphone && !catalog.microphones.some(m => m.id === next.microphone || m.name === next.microphone)) return json(res, 400, { error: '所选设备未连接，请刷新设备列表' });
+          await deviceSettings.save(next);
+          try { await virtual.applyDevices(next); }
+          catch (error) { return json(res, 200, { settings: next, file: deviceSettings.file || '', warning: '配置已保存，暂未完成应用：' + error.message }); }
+          return json(res, 200, { settings: next, file: deviceSettings.file || '' });
+        } catch (error) { return json(res, 500, { error: '保存设备配置失败：' + error.message }); }
+        finally { deviceSaving = false; }
+      }
       if (req.method === 'POST' && ['/api/devices/camera', '/api/devices/microphone'].includes(req.url)) {
         if (req.headers.origin !== `http://127.0.0.1:${server.address().port}` || req.headers['x-host-console'] !== '1' || req.headers['content-type'] !== 'application/json') return json(res, 403, { error: '请在本机控制台操作' });
         let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 256) return json(res, 413, { error: '请求过长' }); }

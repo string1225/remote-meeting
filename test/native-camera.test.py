@@ -11,6 +11,18 @@ spec.loader.exec_module(native)
 
 
 class NativeCameraTests(unittest.TestCase):
+    def test_both_live_sources_flip_relative_to_previous_layout_without_moving_pip(self):
+        usb, pip = native.SyntheticSource(0).frame, native.SyntheticSource(1).frame
+        original_usb, original_pip = usb.copy(), pip.copy()
+        for x, expected in [(0.25, [25, 25, 232]), (0.75, [232, 59, 24])]:
+            image = native.compose(usb, pip, 1920, 1080, native.normalize(dict(zoom=2, x=x, y=0.5)), mirror_main=False, mirror_pip=True)
+            self.assertEqual(image[540, 960].tolist(), expected)
+            self.assertEqual(image[907, 1497].tolist(), [22, 202, 232])
+            self.assertEqual(image[907, 1800].tolist(), [64, 191, 20])
+            self.assertEqual(image[1050, 1497].tolist(), [22, 202, 232])
+        np.testing.assert_array_equal(usb, original_usb)
+        np.testing.assert_array_equal(pip, original_pip)
+
     def test_selection_maps_browser_labels_without_selecting_ir_or_virtual(self):
         names = ["Surface Camera Rear", "Surface IR", "OBS Virtual Camera", "Surface Camera Front", "PC Camera"]
         self.assertEqual(native.select_cameras(names, []), [4, 3])

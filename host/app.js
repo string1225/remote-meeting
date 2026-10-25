@@ -1,4 +1,5 @@
 import '/host-accounts.js';
+import '/device-controls.js';
 import { MeetingRTC } from '/rtc.js';
 import { pageFullscreen, remotePlayers } from '/media.js';
 import { createAudioMonitor } from '/audio-meter.js';
@@ -18,6 +19,8 @@ const playback = createPlaybackControls({ button: $('play-audio'), container: $(
 const players = remotePlayers({ container: $('remote-media'), audioContainer: $('remote-audio'), playback, monitor, onChange: () => { $('remote-empty').hidden = players.size > 0; } });
 const rtc = new MeetingRTC({ channel: 'remote-media', initiate: true, receive: true, send, onTrack: (peer, track) => players.track(peer, track), onPeer: peer => { players.update(peer); renderParticipants(); }, onRemove: peer => players.remove(peer), onError: e => error(e.message) });
 pageFullscreen($('local-stage'), $('local-fullscreen'));
+$('local-preview').onload = () => { if (current?.capturing) { $('local-preview').hidden = false; $('local-empty').hidden = true; } };
+$('local-preview').onerror = () => { $('local-preview').hidden = true; $('local-empty').hidden = false; };
 function renderParticipants() {
   $('participants').replaceChildren(...(current?.peers || []).map(info => {
     const peer = rtc.peers.get(info.id), row = document.createElement('p'); row.textContent = info.name + ' · ' + (peer?.link || ({ connected: '音视频已连接', failed: 'P2P 直连失败，请检查网络', disconnected: '连接中断，正在恢复' }[peer?.state] || '正在建立 P2P 连接')); return row;
@@ -31,12 +34,16 @@ function render(status) {
   $('local-camera-toggle').textContent = status.state === 'starting' ? '取消启动 / 关闭' : status.capturing ? '关闭摄像头' : '启动摄像头';
   $('host-microphone-toggle').textContent = status.microphoneStatus.state === 'starting' ? '话筒正在启动…' : status.microphone ? '关闭现场话筒' : '开启现场话筒';
   $('host-microphone-toggle').disabled = status.microphoneStatus.state === 'starting';
+  const audio = status.microphoneStatus;
+  $('microphone-format').textContent = status.microphone ? `${audio.device || '现场话筒'} · 采集 ${audio.captureRate / 1000} kHz / ${audio.captureChannels} 声道 → Opus ${audio.encodeRate / 1000} kHz · ${audio.packetDurationMs} ms/包${audio.packetsPerSecond ? ' · ' + audio.packetsPerSecond + ' 包/秒' : ''}` : '现场话筒已关闭';
   $('output-settings').textContent = `${status.output.width} × ${status.output.height} / ${status.output.fps} fps · USB 主画面 + 右下角画中画`;
   $('virtual-camera-status').textContent = '现场设备由本地后端直接采集 · WebRTC P2P';
   $('capture-devices').textContent = status.cameras.map(c => c.label + ' · ' + c.width + ' × ' + c.height).join(' / ');
   $('error').hidden = !status.message && !status.media.error; $('error').textContent = status.message || status.media.error;
   $('pause').textContent = status.paused ? '恢复远端接入' : '暂停远端接入';
-  $('local-empty').hidden = status.capturing; $('local-preview').hidden = !status.capturing;
+  const previewReady = status.capturing && $('local-preview').naturalWidth > 0 && !!$('local-preview').getAttribute('src');
+  $('local-empty').hidden = previewReady; $('local-preview').hidden = !previewReady;
+  $('local-empty').textContent = status.capturing ? '正在读取现场合成预览…' : '远端可启动现场摄像头';
   if (!status.capturing) $('local-preview').removeAttribute('src');
   if (first && !viewChosen) showView(true); renderParticipants();
 }

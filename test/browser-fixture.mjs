@@ -24,13 +24,13 @@ export async function instrument(context) {
     };
   });
 }
-export async function localStack({ hardware = false, native = false, virtualCamera = {} } = {}) {
+export async function localStack({ hardware = false, native = false, virtualCamera = {}, deviceSettingsFile } = {}) {
   const password = '12345678', agentKey = 'test-host-machine-key-32-characters-only';
   const cloud = createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: password, HOST_AGENT_KEY: agentKey, USERS_FILE: ':memory:', ALLOWED_ORIGINS: '' });
   cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening');
   const url = 'http://127.0.0.1:' + cloud.address().port + '/';
   let fake;
-  const local = createHostService({ serverUrl: url, agentKey, mediaTest: !hardware && !native, virtualCamera: { ...virtualCamera, synthetic: native && !hardware } },
+  const local = createHostService({ serverUrl: url, agentKey, mediaTest: !hardware && !native, deviceSettingsFile, virtualCamera: { ...virtualCamera, synthetic: native && !hardware } },
     hardware ? {} : native ? { cameraFactory: createVirtualCamera } : { cameraFactory: (config, publish) => { fake = createFakeCamera(config, publish); return fake; } });
   local.listen(0, '127.0.0.1'); await once(local, 'listening');
   const hostBrowser = await chromium.launch(hardware || native ? { ...launchOptions, args: ['--autoplay-policy=no-user-gesture-required'] } : mediaLaunchOptions);

@@ -2,10 +2,12 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
+import { randomUUID } from 'node:crypto';
 
 export function createRtcWorker(config, publish) {
   let child, preview, stopping, iceServers = [], settings = config.output;
   const peers = new Set();
+  const requests = new Map();
   function ensure() {
     if (child) return;
     const process = spawn(config.pythonPath || resolve('.local/virtual-camera/Scripts/python.exe'), ['-u', fileURLToPath(new URL('./rtc-worker.py', import.meta.url))], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -16,18 +18,22 @@ export function createRtcWorker(config, publish) {
       if (child !== process) return;
       try {
         const data = JSON.parse(line);
-        if (data.type === 'preview') preview = data.jpeg ? Buffer.from(data.jpeg, 'base64') : null;
+        if (data.requestId && requests.has(data.requestId)) { const request = requests.get(data.requestId); requests.delete(data.requestId); clearTimeout(request.timer); if (data.type === 'worker-error') request.reject(new Error(data.message)); else request.resolve(data); }
+        else if (data.type === 'preview') preview = data.jpeg ? Buffer.from(data.jpeg, 'base64') : null;
         else publish(data.type === 'camera-state' ? { ...data, type: 'virtual-camera-state', device: 'Native WebRTC' } : data);
       } catch { /* Native diagnostics are separate from signaling. */ }
     });
     process.stderr.on('data', chunk => { diagnostics = (diagnostics + chunk).slice(-1500); });
-    const fail = message => { preview = null; publish({ type: 'virtual-camera-state', state: 'error', message }); publish({ type: 'microphone-state', state: 'error', message }); };
+    const fail = message => { preview = null; for (const request of requests.values()) { clearTimeout(request.timer); request.reject(new Error(message)); } requests.clear(); publish({ type: 'virtual-camera-state', state: 'error', message }); publish({ type: 'microphone-state', state: 'error', message }); };
     process.on('error', error => fail('本地媒体后端无法启动：' + error.message));
     process.on('close', () => { if (child !== process) return; child = null; if (!stopping) fail(diagnostics || '本地媒体后端已退出，请重试连接'); });
   }
   function send(data) { ensure(); if (child?.stdin.writable) child.stdin.write(JSON.stringify(data) + '\n'); }
+  function request(type, data = {}) { const requestId = randomUUID(); return new Promise((resolve, reject) => { requests.set(requestId, { resolve, reject, timer: setTimeout(() => { requests.delete(requestId); reject(new Error('本机设备操作超时，请重试')); }, 30000) }); send({ type, requestId, ...data }); }); }
   return {
     configure(servers) { iceServers = servers || []; },
+    async listDevices() { return (await request('devices-list')).devices; },
+    async applyDevices(next) { Object.assign(config, next); if (child) await request('devices-config', { config: next }); },
     start(output) { settings = output; send({ type: 'camera-start' }); },
     stop() { if (child) send({ type: 'camera-stop' }); },
     microphone(enabled) { send({ type: enabled ? 'microphone-start' : 'microphone-stop' }); },
@@ -37,6 +43,7 @@ export function createRtcWorker(config, publish) {
     signal(id, data) { if (peers.has(id)) send({ type: 'signal', id, data }); },
     get preview() { return preview; },
     async shutdown() {
+      for (const request of requests.values()) { clearTimeout(request.timer); request.reject(new Error('本机服务已关闭')); } requests.clear();
       stopping = true; const old = child; child = null; preview = null; if (!old) return;
       await new Promise(resolve => {
         const timer = setTimeout(() => { const killer = spawn('taskkill', ['/PID', String(old.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); killer.on('error', () => old.kill()); }, 6000);
