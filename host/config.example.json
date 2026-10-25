@@ -7,5 +7,6 @@
   "cameras": [],
   "output": { "width": 1920, "fps": 30 },
   "virtualCamera": { "enabled": true },
+  "rtc": { "encoder": "auto" },
   "headless": false
 }

@@ -2,6 +2,7 @@ import { once } from 'node:events';
 import { chromium } from 'playwright';
 import { createMeetingServer } from '../server/app.js';
 import { createHostService } from '../host/service.js';
+import { createVirtualCamera } from '../host/virtual-camera.js';
 import { createFakeCamera } from './fake-camera.js';
 export const launchOptions = { ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true };
 export const mediaLaunchOptions = { ...launchOptions, args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] };
@@ -30,10 +31,10 @@ export async function localStack({ hardware = false, native = false, virtualCame
   const url = 'http://127.0.0.1:' + cloud.address().port + '/';
   let fake;
   const local = createHostService({ serverUrl: url, agentKey, mediaTest: !hardware && !native, virtualCamera: { ...virtualCamera, synthetic: native && !hardware } },
-    hardware || native ? {} : { cameraFactory: (config, publish) => { fake = createFakeCamera(config, publish); return fake; } });
+    hardware ? {} : native ? { cameraFactory: createVirtualCamera } : { cameraFactory: (config, publish) => { fake = createFakeCamera(config, publish); return fake; } });
   local.listen(0, '127.0.0.1'); await once(local, 'listening');
   const hostBrowser = await chromium.launch(hardware || native ? { ...launchOptions, args: ['--autoplay-policy=no-user-gesture-required'] } : mediaLaunchOptions);
-  const context = await hostBrowser.newContext({ viewport: { width: 1280, height: 900 }, permissions: ['camera', 'microphone'] }); await instrument(context);
+  const context = await hostBrowser.newContext({ viewport: { width: 1280, height: 900 }, permissions: [] }); await instrument(context);
   const host = pollState(await context.newPage()), errors = [];
   host.on('pageerror', e => errors.push('host: ' + e.message));
   await host.goto('http://127.0.0.1:' + local.address().port + '/');

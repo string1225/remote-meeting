@@ -1,13 +1,13 @@
 import { initAccounts } from './accounts.js';
 import { cropControls } from './crop-controls.js';
-import { MeetingRelay } from './relay.js';
+import { MeetingRTC } from './rtc.js';
 import { LocalMedia, pageFullscreen, preview, remotePlayers } from './media.js';
 import { createAudioMonitor } from './audio-meter.js';
 import { createPlaybackControls } from './playback-controls.js';
 const $ = id => document.getElementById(id), base = new URL('./', location.href);
 let socket, ticket, connected = false, wantConnect = false, joining = false, reconnectTimer, requestTimer, messageTimer, retry = 0, state = 'offline', peers = [];
 const storageKey = 'camera-control-ticket';
-let hostMedia = {}, self, localBusy = false;
+let hostMedia = {}, self;
 function notify(text, error = false) {
   clearTimeout(messageTimer); $('message').textContent = text; $('message').className = error ? 'error' : ''; $('message').hidden = false;
   messageTimer = setTimeout(() => { $('message').hidden = true; }, error ? 12000 : 5000);
@@ -22,23 +22,18 @@ const media = new LocalMedia(async () => {
   $('camera-toggle').textContent = media.has('video') ? '关闭我的摄像头' : '开启我的摄像头';
   $('microphone-toggle').textContent = media.has('audio') ? '关闭麦克风' : '开启麦克风';
   $('self-status').textContent = `我的摄像头${media.has('video') ? '已开启' : '已关闭'} · 麦克风${media.has('audio') ? '已开启' : '已关闭'}`;
-  await rtc.sync();
+  await sender.sync();
 }, message => notify(message + '。仍可接收现场画面和声音。', true));
 const players = remotePlayers({ mainVideo: $('host-video'), audioContainer: $('remote-audio'), playback, monitor, onChange: renderVideo });
-const rtc = new MeetingRelay({ stream: media.stream, createSocket: () => { const url = new URL('media', base); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; return new WebSocket(url); }, join: () => ({ type: 'join', ticket }),
-  onSource: (peer, state) => players.source(peer, state), onPeer: peer => { players.update(peer); renderPeers(); }, onRemove: peer => players.remove(peer), onError: error => notify('音视频连接异常：' + error.message, true)
-});
+const signal = message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
+const rtc = new MeetingRTC({ channel: 'host-media', receive: true, send: signal, onTrack: (peer, track) => players.track(peer, track), onPeer: peer => { renderPeers(); renderVideo(); }, onRemove: peer => players.remove(peer), onError: error => notify('P2P 连接异常：' + error.message, true) });
+const sender = new MeetingRTC({ channel: 'remote-media', receive: false, stream: media.stream, send: signal, onError: error => notify(error.message, true) });
 const closeFullscreen = pageFullscreen($('host-stage'), $('host-fullscreen'));
 function renderVideo() {
   const video = $('host-video');
-  const receiving = state === 'capturing' && !!video.getAttribute('src') && video.readyState >= 2;
+  const receiving = state === 'capturing' && !!video.srcObject && video.readyState >= 2;
   $('host-video').hidden = !receiving; $('video-empty').hidden = receiving;
   $('video-empty').textContent = !connected ? '等待连接现场…' : state === 'error' ? '现场设备异常，请检查本地主机' : state === 'idle' ? '现场摄像头已关闭，点击“启动摄像头”查看' : '正在连接现场画面…';
-}
-async function startLocal() {
-  if (localBusy || !connected) return; localBusy = true; void monitor.activate();
-  try { await Promise.all([media.set('audio', true, micConstraints), media.set('video', true, { facingMode: 'user', width: { ideal: 640, max: 640 }, height: { ideal: 360, max: 480 }, frameRate: { ideal: 15, max: 15 } })]); }
-  finally { localBusy = false; }
 }
 function send(data) {
   if (!connected || socket?.readyState !== WebSocket.OPEN) return false;
@@ -61,6 +56,8 @@ function hostStatus(status) {
   $('host-status').textContent = labels[state] || '正在读取主机状态…';
   $('capture-info').textContent = (status.output?.width || 1920) + ' × ' + (status.output?.height || 1080) + ' / ' + (status.output?.fps || 30) + ' fps · USB 主画面 + 右下角笔记本画中画';
   hostMedia = status.media || {};
+  $('host-microphone-toggle').textContent = status.microphoneStatus?.state === 'starting' ? '现场话筒正在启动…' : hostMedia.audio ? '关闭现场话筒' : '开启现场话筒';
+  $('host-microphone-toggle').disabled = !connected || status.microphoneStatus?.state === 'starting';
   $('system-camera-status').textContent = hostMedia.error || (hostMedia.audio ? '现场麦克风已开启' : '现场麦克风未开启');
   renderButton(); renderVideo();
   if (status.view) control.applied(status.view);
@@ -70,7 +67,7 @@ function renderPeers() {
   $('people-count').textContent = peers.filter(p => p.role === 'remote').length + ' / 2 位远端';
   $('participants').replaceChildren(...peers.map(peer => {
     const row = document.createElement('p'), link = rtc.peers.get(peer.id);
-    row.textContent = peer.name + ' · ' + (peer.id === self?.id ? '我' : link?.link || ({ connected: '音视频已连接', connecting: '正在连接音视频', failed: '中转连接失败', disconnected: '正在重连' })[link?.state] || '已接入'); return row;
+    row.textContent = peer.name + ' · ' + (peer.id === self?.id ? '我' : link?.link || ({ connected: '音视频已连接', connecting: '正在连接音视频', failed: 'P2P 直连失败，请检查网络', disconnected: '正在重连' })[link?.state] || '已接入'); return row;
   }));
 }
 async function api(path, method = 'GET') {
@@ -82,7 +79,7 @@ function disconnect(leave = false) {
   const old = socket; socket = null; connected = false;
   if (leave) { if (old?.readyState === WebSocket.OPEN) old.send(JSON.stringify({ type: 'leave' })); ticket = null; sessionStorage.removeItem(storageKey); }
   old?.close(); control.setEnabled(false); renderButton();
-  rtc.clear(); closeFullscreen(); void media.stop(); monitor.reset(); renderVideo();
+  rtc.clear(); sender.clear(); closeFullscreen(); void media.stop(); monitor.reset(); renderVideo();
 }
 function openSocket() {
   if (!wantConnect || !ticket) return;
@@ -96,15 +93,15 @@ function openSocket() {
     const message = JSON.parse(event.data);
     if (message.type === 'joined') {
       connected = true; retry = 0; peers = [message.self, ...message.peers]; renderPeers();
-      self = message.self; rtc.configure(self);
-      for (const peer of message.peers) rtc.add(peer);
+      self = message.self; rtc.configure(self, message.iceServers); sender.configure(self, message.iceServers);
+      for (const peer of message.peers) { rtc.add(peer); sender.add(peer); }
       $('signal-status').textContent = '● 已接入现场';
       hostStatus(message.hostState);
-      void startLocal();
     } else if (message.type === 'host-state') hostStatus(message);
-    else if (message.type === 'peer-joined') { peers = [...peers.filter(p => p.id !== message.peer.id), message.peer]; rtc.add(message.peer); renderPeers(); }
-    else if (message.type === 'peer-left') { peers = peers.filter(p => p.id !== message.id); rtc.remove(message.id); renderPeers(); }
-    else if (message.type === 'media-reset') { rtc.remove(message.from); const peer = peers.find(p => p.id === message.from); if (peer) rtc.add(peer); }
+    else if (message.type === 'peer-joined') { peers = [...peers.filter(p => p.id !== message.peer.id), message.peer]; rtc.add(message.peer); sender.add(message.peer); renderPeers(); }
+    else if (message.type === 'peer-left') { peers = peers.filter(p => p.id !== message.id); rtc.remove(message.id); sender.remove(message.id); renderPeers(); }
+    else if (message.type === 'signal') (message.channel === 'host-media' ? rtc : sender).signal(message.from, message.data);
+    else if (message.type === 'media-reset') { sender.remove(message.from); const peer = peers.find(p => p.id === message.from); if (peer) sender.add(peer); }
     else if (message.type === 'error' || message.type === 'ended') {
       disconnect(true); notify(message.message, true);
       if (message.code === 'AUTH') { reconnectTimer = setTimeout(() => void activate(), 1000); }
@@ -115,7 +112,7 @@ function openSocket() {
   ws.onerror = () => {};
   ws.onclose = () => {
     clearTimeout(timeout); if (socket !== ws) return;
-    socket = null; connected = false; rtc.clear(); renderButton(); renderVideo();
+    socket = null; connected = false; rtc.clear(); sender.clear(); renderButton(); renderVideo();
     $('signal-status').textContent = '控制连接中断，正在恢复…';
     if (wantConnect) reconnectTimer = setTimeout(openSocket, Math.min(1000 * 2 ** retry++, 5000));
   };
@@ -149,6 +146,7 @@ $('host-camera-toggle').onclick = () => {
   $('host-camera-toggle').disabled = true;
   requestTimer = setTimeout(() => { renderButton(); notify('暂未收到摄像头状态，请检查本地主机。', true); }, 20000);
 };
+$('host-microphone-toggle').onclick = () => { send({ type: hostMedia.audio ? 'microphone-stop' : 'microphone-start' }); };
 const poll = setInterval(async () => {
   if (!accounts.current()) return;
   try { if (!connected) { hostStatus(await api('host-status')); if (wantConnect) void activate(); } }
@@ -156,5 +154,5 @@ const poll = setInterval(async () => {
 }, 10000);
 const statsTimer = setInterval(() => void rtc.stats(), 3000);
 window.addEventListener('pagehide', () => { wantConnect = false; clearInterval(poll); clearInterval(statsTimer); disconnect(); control.dispose(); monitor.dispose(); });
-window.controlDiagnostics = () => ({ connected, state, view: control.view, localMedia: rtc.flags(), rtc: [...rtc.peers.values()].map(peer => ({ id: peer.info.id, state: peer.state, media: peer.media })) });
-window.meetingStats = () => rtc.stats();
+window.controlDiagnostics = () => ({ connected, state, view: control.view, localMedia: sender.flags(), rtc: [...rtc.peers.values()].map(peer => ({ id: peer.info.id, state: peer.state, media: peer.media })) });
+window.meetingStats = () => rtc.lastStats || [];

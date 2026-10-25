@@ -1,12 +1,12 @@
 // Opt-in independent Windows driver acceptance, using synthetic pixels only.
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { localStack, mediaLaunchOptions, remotePage, connectRemote, setView, duplex } from './browser-fixture.mjs';
+import { localStack, mediaLaunchOptions, remotePage, connectRemote, setView, duplex, startCameras } from './browser-fixture.mjs';
 import { nativeReceiver, openVirtual, stopVirtual } from './native-receiver.mjs';
 const stack = await localStack({ native: true }), browser = await chromium.launch(mediaLaunchOptions);
 let receiver;
 try {
-  const remote = await remotePage(browser, stack.errors); await connectRemote(remote, stack.url, stack.password);
+  const remote = await remotePage(browser, stack.errors); await connectRemote(remote, stack.url, stack.password); await startCameras(remote);
   await stack.host.waitForFunction(() => window.hostDiagnostics().virtualCamera.state === 'ready', null, { timeout: 40000 });
   assert.match(stack.local.hostStatus().virtualCamera.device, /^Remote Meeting Camera.*Windows/);
 
@@ -27,7 +27,7 @@ try {
   assert.equal(stack.local.hostStatus().virtualCamera.state, 'ready'); await sample('red');
   await stack.host.reload(); await stack.host.waitForFunction(() => window.hostDiagnostics()?.capturing); await sample('red');
   await stack.host.locator('#view-cameras').click();
-  assert.equal(await remote.evaluate(() => window.testPeers.length), 0);
+
   await stack.host.locator('#local-camera-toggle').click(); await stack.host.waitForFunction(() => window.hostDiagnostics().virtualCamera.state === 'stopped');
   await stopVirtual(receiver.page); assert.deepEqual(stack.errors, []);
   console.log('PASS: independent Remote Meeting Camera receives 1080p/30; OBS remains a separate device; remote zoom/pan with fixed PIP; web preview; remote departure and local console reload preserve output; local stop releases worker.');

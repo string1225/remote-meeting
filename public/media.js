@@ -67,29 +67,9 @@ export function remotePlayers({ container, audioContainer, playback, monitor, ma
     const entry = { video, audio: null, card, empty, closeFullscreen }; peers.set(peer.info.id, entry); return entry;
   }
   return {
-    source(peer, state) {
-      const entry = ensure(peer); monitor?.removeRemote(peer.info.id);
-      if (entry.loadedPlayer && entry.onLoaded) entry.loadedPlayer.removeEventListener('loadeddata', entry.onLoaded);
-      let player;
-      if (state.video) {
-        player = entry.video; player.hidden = false;
-        if (entry.audio) { entry.audio.removeAttribute('src'); entry.audio.load(); entry.audio.remove(); entry.audio = null; }
-        if (state.audio) player.dataset.remoteAudio = 'true'; else delete player.dataset.remoteAudio;
-      } else {
-        entry.video.removeAttribute('src'); entry.video.load(); entry.video.hidden = true; delete entry.video.dataset.remoteAudio;
-        if (!entry.audio) { entry.audio = document.createElement('audio'); entry.audio.autoplay = true; entry.audio.dataset.peer = peer.info.id; audioContainer.append(entry.audio); }
-        player = entry.audio;
-      }
-      if (state.audio) playback.add(player); else { player.muted = true; void player.play().catch(() => {}); }
-      entry.onLoaded = () => {
-        try { const stream = player.captureStream?.(); if (state.audio && stream?.getAudioTracks().length) monitor?.addRemote(peer.info.id, stream, player); } catch { /* Playback remains available without meter capture support. */ }
-        onChange();
-      };
-      entry.loadedPlayer = player; player.addEventListener('loadeddata', entry.onLoaded, { once: true });
-      if (entry.empty) entry.empty.hidden = state.video; onChange(); return player;
-    },
     track(peer, track) {
       const entry = ensure(peer);
+      entry.video.addEventListener('loadeddata', onChange, { once: true });
       if (track.kind === 'video') { preview(entry.video, track); if (entry.empty) entry.empty.hidden = true; }
       else {
         if (!entry.audio) { entry.audio = document.createElement('audio'); entry.audio.autoplay = true; audioContainer.append(entry.audio); }
@@ -97,7 +77,7 @@ export function remotePlayers({ container, audioContainer, playback, monitor, ma
       }
       track.onmute = track.onunmute = () => onChange(); onChange();
     },
-    update(peer) { const entry = peers.get(peer.info.id); if (entry?.empty) entry.empty.hidden = peer.media.video && !!(entry.video.srcObject || entry.video.getAttribute('src')); onChange(); },
+    update(peer) { const entry = peers.get(peer.info.id); if (entry) { entry.video.hidden = !peer.media.video; if (entry.empty) entry.empty.hidden = peer.media.video && !!entry.video.srcObject; } onChange(); },
     remove(peer) {
       const entry = peers.get(peer.info.id); if (!entry) return;
       entry.closeFullscreen?.(); entry.video.srcObject = null; entry.video.removeAttribute('src'); delete entry.video.dataset.remoteAudio;

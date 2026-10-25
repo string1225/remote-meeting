@@ -3,14 +3,14 @@
 <body><header><a class="brand" href="./"><span class="brand-icon">◈</span> 同屏 <small>LIVE MEETING</small></a><span class="badge"><i></i> 双向音视频</span></header><main>
 <section id="lobby" class="intro"><span class="eyebrow">LIVE MEETING</span><h1>远程看现场，<br>画面与声音互通。</h1><p>登录后连接现场摄像头，查看画面、听声音并控制缩放。<br>开启自己的摄像头和麦克风，即可与现场互通。</p></section>
 <section class="panel account-panel"><form id="setup-form"><input id="name" type="hidden" value="远端用户"><div id="admin-field">
-<div id="login-fields"><div class="form-pair"><label>远端账号<input id="username" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="主机分配的账号" required></label><label>登录密钥<input id="admin-key" type="password" autocomplete="current-password" maxlength="128" placeholder="主机设置的密钥" required></label></div><button id="login" type="button" class="primary full">登录并接入 <span>↗</span></button><p class="hint">登录后进入视频页面。通话时请允许浏览器使用摄像头和麦克风。</p></div>
+<div id="login-fields"><div class="form-pair"><label>远端账号<input id="username" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="主机分配的账号" required></label><label>登录密钥<input id="admin-key" type="password" autocomplete="current-password" maxlength="128" placeholder="主机设置的密钥" required></label></div><button id="login" type="button" class="primary full">登录并接入 <span>↗</span></button><p class="hint">登录后设备默认关闭，请手动开启现场摄像头和话筒。</p></div>
 <div id="signed-in" hidden><strong id="account-name"></strong><div class="account-actions"><button id="manage-users" type="button" class="secondary" hidden>账号管理</button><button id="logout" type="button" class="text-button">退出登录</button></div></div>
 </div></form></section>
 <section id="meeting" hidden>
 <div class="meeting-top"><div><span class="eyebrow">LIVE MEETING</span><h1>现场视频 <span id="people-count">0 / 2 位远端</span></h1><p id="capture-info" class="hint">1920 × 1080 / 30 fps</p></div><button id="leave" type="button" class="secondary">退出通话</button></div>
 <div class="media-grid"><section class="live-main">
 <div id="host-stage" class="video-stage main-stage"><video id="host-video" autoplay playsinline muted></video><p id="video-empty" class="video-empty">等待现场画面…</p><div class="stage-top"><span id="host-status" role="status">正在读取主机状态…</span><button id="host-fullscreen" type="button" class="secondary">网页内全屏</button></div><div id="video-controls"></div></div>
-<div class="live-toolbar"><button id="host-camera-toggle" type="button" class="primary" disabled>摄像头正在准备…</button><button id="play-audio" type="button" class="secondary">播放现场声音</button><span id="system-camera-status" class="hint" role="status"></span></div>
+<div class="live-toolbar"><button id="host-camera-toggle" type="button" class="primary" disabled>摄像头正在准备…</button><button id="host-microphone-toggle" type="button" class="secondary" disabled>开启现场话筒</button><button id="play-audio" type="button" class="secondary">播放现场声音</button><span id="system-camera-status" class="hint" role="status"></span></div>
 <div class="panel zoom-panel"><div class="panel-heading"><h2>USB 画面缩放与位置</h2><span class="hint">1–8× 数字缩放</span></div><div id="usb-controls"></div><p class="hint">可拖动画面、使用方向键或调整定位框。笔记本画中画保持在右下角。</p></div>
 </section><aside class="live-sidebar"><section class="panel"><h2>我的画面与声音</h2><div class="self-stage"><video id="self-video" autoplay playsinline muted></video><p id="self-empty" class="video-empty">本机摄像头未开启</p></div><div class="self-actions"><button id="camera-toggle" type="button" class="secondary">开启我的摄像头</button><button id="microphone-toggle" type="button" class="secondary">开启麦克风</button></div><p id="self-status" class="hint">允许权限后，现场也能看到你并听到声音。</p><div id="remote-audio-monitor"></div></section><section class="panel connection-info"><p id="signal-status" role="status">正在连接…</p><button id="join-button" type="button" class="secondary">重新接入</button><h2>在线人员</h2><div id="participants"></div></section></aside></div><div id="remote-audio" hidden></div>
 </section>
@@ -31,4 +31,4 @@
         <button type="submit" class="primary full">新增账号 <span>＋</span></button>
       </form>
     </dialog>
-<div id="message" role="status" aria-live="polite" hidden></div></main><footer><span>同屏 / LIVE MEETING</span><span>画面与声音双向互通 · 加密媒体中转。</span></footer></body></html>
+<div id="message" role="status" aria-live="polite" hidden></div></main><footer><span>同屏 / LIVE MEETING</span><span>画面与声音双向互通 · WebRTC P2P。</span></footer></body></html>

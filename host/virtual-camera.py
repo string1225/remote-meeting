@@ -53,13 +53,17 @@ def cover(frame, width, height, view):
     left = max(0, round(view["x"] * w - cw / 2))
     top = max(0, round(view["y"] * h - ch / 2))
     right, bottom = min(w, max(left + 1, round(left + cw))), min(h, max(top + 1, round(top + ch)))
-    return cv2.resize(frame[top:bottom, left:right], (width, height), interpolation=cv2.INTER_LINEAR)
+    region = frame[top:bottom, left:right]
+    if region.shape[:2] == (height, width):
+        return region
+    return cv2.resize(region, (width, height), interpolation=cv2.INTER_LINEAR)
 
 
 def compose(main, pip, width, height, view):
     # View coordinates follow the mirrored USB image; place PIP afterwards so
     # its orientation and lower-right output anchor stay independent.
-    output = cover(main[:, ::-1], width, height, view)
+    source_view = dict(view, x=1 - view['x'])
+    output = cv2.flip(cover(main, width, height, source_view), 1)
     pw = round(width * 0.26)
     margin_x, margin_y = round(width * 0.02), round(height * 0.02)
     ph = round(pw * 9 / 16)

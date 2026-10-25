@@ -1,0 +1,3 @@
+-r virtual-camera-requirements.txt
+aiortc==1.15.0
+sounddevice==0.5.6

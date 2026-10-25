@@ -18,3 +18,17 @@ test('local control listener blocks cross-origin sockets and DNS rebinding; no m
   await assert.rejects(once(ws, 'open'));
   assert.throws(() => createHostService({ serverUrl: 'http://example.com/', agentKey: key }), /HTTPS/);
 });
+
+test('native device APIs work without a renderer and require same-origin console requests', async t => {
+  const calls = [], server = createHostService({ serverUrl: 'http://127.0.0.1:9/', agentKey: 'native-api-test-machine-key-32-characters' }, { cameraFactory: () => ({ start: output => calls.push(['camera', true, output.width]), stop: () => calls.push(['camera', false]), microphone: enabled => calls.push(['microphone', enabled]) }) });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening'); t.after(() => server.shutdown());
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const request = (kind, data, headers = {}) => fetch(origin + '/api/devices/' + kind, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', 'X-Host-Console': '1', ...headers }, body: JSON.stringify(data) });
+  assert.equal((await fetch(origin)).headers.get('permissions-policy'), 'camera=(), microphone=()');
+  assert.equal((await request('camera', { enabled: true }, { Origin: 'https://attacker.example' })).status, 403);
+  assert.equal((await request('camera', { enabled: true }, { 'X-Host-Console': '' })).status, 403);
+  assert.equal((await request('camera', { enabled: 'yes' })).status, 400);
+  assert.deepEqual(calls, []);
+  for (const kind of ['microphone', 'camera']) for (const enabled of [true, false]) assert.equal((await request(kind, { enabled })).status, 202);
+  assert.deepEqual(calls, [['microphone', true], ['microphone', false], ['camera', true, 1920], ['camera', false]]);
+});

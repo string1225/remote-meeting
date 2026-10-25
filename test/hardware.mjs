@@ -1,43 +1,35 @@
-// Opt-in native hardware acceptance. Real media remains in the local test stack; no images are saved.
+// Opt-in real hardware acceptance. No camera images are saved.
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { localStack, mediaLaunchOptions, remotePage, connectRemote, setView, duplex } from './browser-fixture.mjs';
-import { nativeReceiver, openVirtual, stopVirtual } from './native-receiver.mjs';
-const stack = await localStack({ hardware: true }), browser = await chromium.launch(mediaLaunchOptions);
-let receiver;
+import { localStack, mediaLaunchOptions, remotePage, connectRemote, startCameras, setView } from './browser-fixture.mjs';
+const stack=await localStack({hardware:true}), browser=await chromium.launch(mediaLaunchOptions);
 try {
-  const remote = await remotePage(browser, stack.errors); await connectRemote(remote, stack.url, stack.password);
-  await stack.host.waitForFunction(() => window.hostDiagnostics().virtualCamera.state === 'ready', null, { timeout: 40000 });
-  const status = stack.local.hostStatus();
-  assert.equal(status.cameras.length, 2);
-  assert.deepEqual(status.output, { width: 1920, height: 1080, fps: 30 });
-  const [usb, pip] = status.cameras;
-  assert.ok(usb.width <= 1920 && usb.height <= 1080 && usb.frameRate <= 30.01);
-  assert.ok(pip.width <= 640 && pip.height <= 480 && pip.frameRate <= 30.01);
-  assert.match(usb.label, /PC Camera|USB/i); assert.match(pip.label, /Surface.*Front/i);
-  receiver = await nativeReceiver(); const info = await openVirtual(receiver.page);
-  assert.equal(info.settings.width, 1920); assert.equal(info.settings.height, 1080); assert.equal(info.settings.frameRate, 30);
-  await setView(remote, 0, 2, 0.25); await stack.host.waitForFunction(() => window.hostDiagnostics().view.zoom === 2);
-  await stack.host.waitForFunction(() => window.hostDiagnostics().virtualCamera.measuredFps > 0);
-  // Observe output after the receiver has opened; producer frame rate is distinct from device mode.
-  await receiver.page.waitForTimeout(6000);
-  console.log(JSON.stringify({ cameras: status.cameras, output: status.output, device: info.settings, measuredFps: stack.local.hostStatus().virtualCamera.measuredFps }));
-  assert.equal(await remote.evaluate(() => window.testPeers.length), 0);
-  await stack.host.locator('#view-cameras').click(); await stack.host.locator('#local-camera-toggle').click();
-  await stack.host.waitForFunction(() => window.hostDiagnostics().virtualCamera.state === 'stopped'); await stopVirtual(receiver.page);
-  const reopened = await receiver.page.evaluate(async () => {
-    const devices = await navigator.mediaDevices.enumerateDevices(), streams = [];
-    try {
-      for (const name of ['PC Camera (eba4:6579)', 'Surface Camera Front (045e:0990)']) {
-        const device = devices.find(d => d.kind === 'videoinput' && d.label === name);
-        if (!device) throw new Error('Original camera missing: ' + name);
-        streams.push(await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: device.deviceId }, width: { ideal: 640, max: 640 }, height: { ideal: 480, max: 480 } }, audio: false }));
-      }
-      return streams.map(stream => ({ label: stream.getVideoTracks()[0].label, state: stream.getVideoTracks()[0].readyState }));
-    } finally { streams.forEach(stream => stream.getTracks().forEach(t => t.stop())); }
-  });
-  assert.equal(reopened.length, 2); assert.ok(reopened.every(camera => camera.state === 'live'));
-  assert.equal(stack.local.hostStatus().peers.length, 1); assert.deepEqual(stack.errors, []);
-  console.log('PASS: actual native USB and Surface capture; independent 1080p/30 virtual-camera mode; remote login/start/zoom, web media, and local close allows another app to reacquire both original cameras while control remains connected.');
-} catch (error) { console.error(stack.local.hostStatus()); throw error; }
-finally { await receiver?.close(); await browser.close(); await stack.close(); }
+ const remote=await remotePage(browser,stack.errors); await connectRemote(remote,stack.url,stack.password);
+ assert.equal(stack.local.hostStatus().capturing,false); assert.equal(stack.local.hostStatus().microphone,false);
+ await remote.locator('#host-microphone-toggle').click(); await stack.host.waitForFunction(()=>hostDiagnostics().microphone&&!hostDiagnostics().capturing);
+ await startCameras(remote);
+ await remote.waitForFunction(()=>meetingStats().some(p=>p.receivedVideo>60&&p.receivedAudio>0&&p.transport==='p2p'),null,{timeout:45000});
+ const before=await remote.evaluate(()=>({frames:document.querySelector('#host-video').getVideoPlaybackQuality().totalVideoFrames,time:performance.now()}));
+ await remote.waitForFunction(time=>performance.now()-time>8000,before.time);
+ const after=await remote.evaluate(()=>({frames:document.querySelector('#host-video').getVideoPlaybackQuality().totalVideoFrames,time:performance.now(),width:document.querySelector('#host-video').videoWidth,height:document.querySelector('#host-video').videoHeight,stats:meetingStats()}));
+ assert.equal(after.width,1920);assert.equal(after.height,1080);
+ await remote.locator('#camera-toggle').click();await remote.locator('#microphone-toggle').click();
+ await stack.host.waitForFunction(()=>hostMediaStats().some(p=>p.receivedVideo>5&&p.receivedAudio>0&&p.transport==='p2p'));
+ assert.deepEqual(await stack.host.evaluate(()=>testMediaRequests),[]);
+ await setView(remote,0,2,0.25);await stack.host.waitForFunction(()=>hostDiagnostics().view.zoom===2);
+ console.log(JSON.stringify({output:stack.local.hostStatus().output,cameras:stack.local.hostStatus().cameras,encoder:stack.local.hostStatus().virtualCamera,decodedFps:Math.round((after.frames-before.frames)*1000/(after.time-before.time)),media:after.stats}));
+ await stack.host.locator('#view-cameras').click();await stack.host.locator('#local-camera-toggle').click();
+ await stack.host.waitForFunction(()=>hostDiagnostics().virtualCamera.state==='stopped');assert.equal(stack.local.hostStatus().microphone,true);
+ const context=await stack.hostBrowser.newContext({permissions:['camera']});const receiver=await context.newPage();await receiver.goto(stack.url);
+ const released=await receiver.evaluate(async()=>{
+  const devices=await navigator.mediaDevices.enumerateDevices(),result=[];
+  for(const pattern of [/PC Camera/i,/Surface Camera Front/i]){
+   const d=devices.find(d=>d.kind==='videoinput'&&pattern.test(d.label));assertDevice(d);
+   const stream=await navigator.mediaDevices.getUserMedia({video:{deviceId:{exact:d.deviceId},width:{ideal:640,max:640},height:{ideal:480,max:480}},audio:false});
+   result.push(stream.getVideoTracks()[0].readyState);stream.getTracks().forEach(t=>t.stop());
+  }return result;
+  function assertDevice(d){if(!d)throw Error('Original camera missing');}
+ });assert.deepEqual(released,['live','live']);await context.close();assert.deepEqual(stack.errors,[]);
+ console.log('PASS: manual backend USB/Surface/WASAPI capture, 1080p P2P H264/Opus, browser zero-capture, reverse video/audio, shared controls and independent physical-device release.');
+} catch(error){console.error(stack.local.hostStatus());throw error;}
+finally{await browser.close();await stack.close();}

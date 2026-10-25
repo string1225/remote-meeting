@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
-import { localStack, mediaLaunchOptions, remotePage, connectRemote, duplex } from './browser-fixture.mjs';
+import { localStack, mediaLaunchOptions, remotePage, connectRemote, duplex, startCameras } from './browser-fixture.mjs';
 const stack = await localStack(), browser = await chromium.launch(mediaLaunchOptions);
 try {
   await mkdir('test-results', { recursive: true });
-  const page = await remotePage(browser, stack.errors); await connectRemote(page, stack.url, stack.password);
+  const page = await remotePage(browser, stack.errors); await connectRemote(page, stack.url, stack.password); await startCameras(page); await page.locator('#host-microphone-toggle').click(); await page.locator('#camera-toggle').click(); await page.locator('#microphone-toggle').click();
   await page.waitForFunction(() => !document.querySelector('.crop-controls input').disabled);
   await duplex(page); await duplex(stack.host, true);
   const overlay = page.locator('.crop-overlay');
