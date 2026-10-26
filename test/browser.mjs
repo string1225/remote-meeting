@@ -15,7 +15,7 @@ try {
   for (const p of clients) { await p.locator('#camera-toggle').click(); await p.locator('#microphone-toggle').click(); }
   assert.equal(stack.camera.starts, 1);
   assert.equal(stack.local.hostStatus().peers.length, 2);
-  for (const page of clients) { await duplex(page); assert.ok((await page.evaluate(()=>meetingStats())).every(p=>p.transport==='p2p')); } await duplex(stack.host, true);
+  for (const page of clients) { await duplex(page); assert.ok((await page.evaluate(()=>meetingStats())).every(p=>p.transport==='relay' && p.localCandidate==='relay' && p.remoteCandidate==='relay')); } await duplex(stack.host, true);
   const hostUrl = stack.host.url(); await stack.host.goto('about:blank');
   await clients[0].waitForFunction(()=>document.querySelector('#host-video').getVideoPlaybackQuality().totalVideoFrames>30);
   assert.equal(stack.local.hostStatus().capturing,true); await stack.host.goto(hostUrl);
@@ -55,5 +55,5 @@ try {
   assert.deepEqual(await stack.host.evaluate(()=>testMediaRequests), []);
 
   assert.deepEqual(stack.errors, []);
-  console.log('PASS: manual native camera/microphone startup and duplex P2P video/audio, shared camera controls, local stop, restart, reconnect, capacity and account departure.');
+  console.log('PASS: manual native camera/microphone startup and duplex TURN relay video/audio, shared camera controls, local stop, restart, reconnect, capacity and account departure.');
 } finally { await browser.close(); await stack.close(); }

@@ -13,9 +13,10 @@ from fractions import Fraction
 import av
 import cv2
 import numpy as np
-from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCRtpSender, RTCSessionDescription, MediaStreamTrack
+from aiortc import RTCBundlePolicy, RTCConfiguration, RTCPeerConnection, RTCRtpSender, RTCSessionDescription, MediaStreamTrack
 from aiortc.sdp import candidate_from_sdp
 from audio_capture import Microphone, OpusPackets, microphones
+from relay import enforce_relay, ice_servers
 
 spec = importlib.util.spec_from_file_location('capture', pathlib.Path(__file__).with_name('virtual-camera.py'))
 capture = importlib.util.module_from_spec(spec)
@@ -280,16 +281,21 @@ async def main():
         try:
             if kind == 'peer-add':
                 await remove(id)
-                pc = RTCPeerConnection(RTCConfiguration(iceServers=[RTCIceServer(**server) for server in config.get('iceServers', [])]))
+                pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers(config), bundlePolicy=RTCBundlePolicy.MAX_BUNDLE))
                 peers[id] = pc
                 for source in [devices.video, devices.audio]:
                     t = pc.addTransceiver(Subscription(source), direction='sendonly')
                     if source.kind == 'video': t.setCodecPreferences([c for c in RTCRtpSender.getCapabilities('video').codecs if c.mimeType == 'video/H264'])
+                enforce_relay(pc)
                 @pc.on('connectionstatechange')
                 async def state():
                     emit(type='peer-state', id=id, state=pc.connectionState)
                 await pc.setLocalDescription(await pc.createOffer())
+                if not any(line.startswith('a=candidate:') and ' typ relay' in line for line in pc.localDescription.sdp.splitlines()):
+                    await remove(id)
+                    raise RuntimeError('TURN relay unavailable; direct P2P is disabled')
                 if peers.get(id) is pc: emit(type='signal', to=id, channel='host-media', data={'description': {'type': pc.localDescription.type, 'sdp': pc.localDescription.sdp}})
+            elif kind == 'ice-config': config['iceServers'] = message.get('iceServers', [])
             elif kind == 'peer-remove': await remove(id)
             elif kind == 'signal' and id in peers:
                 data = message['data']

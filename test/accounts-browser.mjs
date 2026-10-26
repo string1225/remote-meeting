@@ -6,9 +6,10 @@ import { chromium } from 'playwright';
 import { mediaLaunchOptions } from './browser-fixture.mjs';
 import { createMeetingServer } from '../server/app.js';
 import { WebSocket } from 'ws';
+import { relayTestEnv } from './relay-fixture.mjs';
 
 const password = process.env.E2E_ADMIN_KEY || '12345678';
-const server = process.env.E2E_BASE_URL ? null : createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: password, USERS_FILE: ':memory:', HOST_AGENT_KEY: 'account-test-machine-key-at-least-32-chars', ALLOWED_ORIGINS: '', STUN_URLS: '' });
+const server = process.env.E2E_BASE_URL ? null : createMeetingServer({ ...relayTestEnv, BOOTSTRAP_ADMIN_PASSWORD: password, USERS_FILE: ':memory:', HOST_AGENT_KEY: 'account-test-machine-key-at-least-32-chars', ALLOWED_ORIGINS: '' });
 if (server) { server.listen(0, '127.0.0.1'); await once(server, 'listening'); }
 const url = process.env.E2E_BASE_URL || `http://127.0.0.1:${server.address().port}/`;
 let mockHost;

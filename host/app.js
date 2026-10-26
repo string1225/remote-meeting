@@ -23,7 +23,7 @@ $('local-preview').onload = () => { if (current?.capturing) { $('local-preview')
 $('local-preview').onerror = () => { $('local-preview').hidden = true; $('local-empty').hidden = false; };
 function renderParticipants() {
   $('participants').replaceChildren(...(current?.peers || []).map(info => {
-    const peer = rtc.peers.get(info.id), row = document.createElement('p'); row.textContent = info.name + ' · ' + (peer?.link || ({ connected: '音视频已连接', failed: 'P2P 直连失败，请检查网络', disconnected: '连接中断，正在恢复' }[peer?.state] || '正在建立 P2P 连接')); return row;
+    const peer = rtc.peers.get(info.id), row = document.createElement('p'); row.textContent = info.name + ' · ' + (peer?.link || ({ connected: '音视频已连接', failed: '服务器转发连接失败，请检查网络', disconnected: '连接中断，正在恢复' }[peer?.state] || '正在连接转发服务器')); return row;
   }));
 }
 function render(status) {
@@ -37,7 +37,7 @@ function render(status) {
   const audio = status.microphoneStatus;
   $('microphone-format').textContent = status.microphone ? `${audio.device || '现场话筒'} · 采集 ${audio.captureRate / 1000} kHz / ${audio.captureChannels} 声道 → Opus ${audio.encodeRate / 1000} kHz · ${audio.packetDurationMs} ms/包${audio.packetsPerSecond ? ' · ' + audio.packetsPerSecond + ' 包/秒' : ''}` : '现场话筒已关闭';
   $('output-settings').textContent = `${status.output.width} × ${status.output.height} / ${status.output.fps} fps · USB 主画面 + 右下角画中画`;
-  $('virtual-camera-status').textContent = '现场设备由本地后端直接采集 · WebRTC P2P';
+  $('virtual-camera-status').textContent = '现场设备由本地后端直接采集 · WebRTC ?????';
   $('capture-devices').textContent = status.cameras.map(c => c.label + ' · ' + c.width + ' × ' + c.height).join(' / ');
   $('error').hidden = !status.message && !status.media.error; $('error').textContent = status.message || status.media.error;
   $('pause').textContent = status.paused ? '恢复远端接入' : '暂停远端接入';

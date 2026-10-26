@@ -3,11 +3,12 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { authenticateAgent } from './agent-auth.js';
 import { normalizeView } from '../host/crop.js';
 import { compositeSettings } from '../host/composite.js';
+import { isRelayCandidate, relaySdp } from './relay.js';
 
 const error = (status, message) => Object.assign(new Error(message), { status });
 const describe = p => ({ id: p.id, role: p.role, name: p.name });
 
-export function createHub(server, { hostKey, sessionFor, originAllowed, rate, address, iceServers = [], reconnectMs = 30000 }) {
+export function createHub(server, { hostKey, sessionFor, originAllowed, rate, address, relayConfig, reconnectMs = 30000 }) {
   if (typeof hostKey !== 'string' || hostKey.length < 32 || hostKey.startsWith('replace-')) throw new Error('HOST_AGENT_KEY must contain at least 32 random characters');
   const remotes = new Map(), connections = new Map();
   let host = null, hostState = { state: 'offline', cameras: [] };
@@ -54,7 +55,7 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
       peer = host = { id: randomUUID(), role: 'host', name: '现场主机', ws };
       hostState = { state: 'idle', cameras: [] };
       clearTimeout(joinTimer);
-      send(ws, { type: 'joined', self: describe(peer), peers: connected().map(describe), mediaTransport: 'p2p', iceServers });
+      send(ws, { type: 'joined', self: describe(peer), peers: connected().map(describe), ...relayConfig() });
       broadcast({ type: 'peer-joined', peer: describe(peer) }, peer);
       broadcast({ type: 'host-state', ...hostState }, peer);
     }
@@ -73,7 +74,9 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
           if (!host) return fail('HOST_OFFLINE', '现场主机离线，请等待主机上线');
           peer = reservation; peer.ws = ws; peer.request = req;
           clearTimeout(joinTimer);
-          send(ws, { type: 'joined', self: describe(peer), peers: [host, ...connected().filter(p => p !== peer)].map(describe), expiresAt: session.expiresAt, hostState, mediaTransport: 'p2p', iceServers });
+          // Refresh an idle host before it creates connections for a new remote.
+          send(host.ws, { type: 'ice-config', ...relayConfig() });
+          send(ws, { type: 'joined', self: describe(peer), peers: [host, ...connected().filter(p => p !== peer)].map(describe), expiresAt: session.expiresAt, hostState, ...relayConfig() });
           broadcast({ type: 'peer-joined', peer: describe(peer) }, peer);
           return;
         }
@@ -98,10 +101,11 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
           if (data.description) {
             const d = data.description;
             if (d.type !== (agent ? 'offer' : 'answer') || typeof d.sdp !== 'string' || d.sdp.length > 48000) return fail('INVALID', '无效的媒体协商');
-            clean = { description: { type: d.type, sdp: d.sdp } };
+            clean = { description: { type: d.type, sdp: relaySdp(d.sdp) } };
           } else if (data.candidate) {
             const c = data.candidate;
             if (typeof c.candidate !== 'string' || c.candidate.length > 2048 || typeof c.sdpMid !== 'string' && c.sdpMid !== null || !Number.isInteger(c.sdpMLineIndex) || c.sdpMLineIndex < 0 || c.sdpMLineIndex > 10) return fail('INVALID', '无效的连接地址');
+            if (!isRelayCandidate(c.candidate)) return;
             clean = { candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex } };
           } else if (data.media && msg.channel === 'remote-media' && !agent) clean = { media: { audio: data.media.audio === true, video: data.media.video === true } };
           else if (data.restart === true && !agent) clean = { restart: true };

@@ -7,7 +7,8 @@ export class MeetingRTC {
   add(info) {
     if (!this.self || info.id === this.self.id || info.role === this.self.role) return;
     if (this.peers.has(info.id)) return this.peers.get(info.id);
-    const pc = new RTCPeerConnection({ iceServers: this.iceServers, bundlePolicy: 'max-bundle' });
+    if (!this.iceServers?.some(server => (Array.isArray(server.urls) ? server.urls : [server.urls]).some(url => /^turns?:/.test(url)) && server.username && server.credential)) throw new Error('缺少服务器转发配置，请检查 TURN 服务');
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers, iceTransportPolicy: 'relay', bundlePolicy: 'max-bundle' });
     const peer = { info, pc, state: 'connecting', media: { audio: false, video: false }, candidates: [], queue: Promise.resolve(), senders: {}, snapshot: {} }; this.peers.set(info.id, peer);
     const signal = data => this.send({ type: 'signal', to: info.id, channel: this.channel, data }); peer.signal = signal;
     pc.onicecandidate = ({ candidate }) => { if (candidate) signal({ candidate: candidate.toJSON() }); };
@@ -75,7 +76,7 @@ export class MeetingRTC {
         }
         const local = pair && reports.get(pair.localCandidateId), remote = pair && reports.get(pair.remoteCandidateId);
         const relay = local?.candidateType === 'relay' || remote?.candidateType === 'relay';
-        peer.link = pair ? relay ? 'TURN 中转' : 'P2P 直连' : ''; this.onPeer?.(peer);
+        peer.link = pair ? relay ? '服务器转发' : '异常：未使用转发' : ''; this.onPeer?.(peer);
         output.push({ id: peer.info.id, state: peer.pc.connectionState, transport: pair ? relay ? 'relay' : 'p2p' : 'connecting', localCandidate: local?.candidateType, remoteCandidate: remote?.candidateType, receivedAudio, receivedVideo, receivedBytes: bytes, rtt: pair?.currentRoundTripTime });
       } catch { /* The connection may close during collection. */ }
     }

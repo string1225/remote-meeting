@@ -148,7 +148,8 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
       if (ws !== cloud) return;
       try {
         const message = JSON.parse(raw.toString());
-        if (message.type === 'joined') { cloudWelcome = { self: message.self, iceServers: message.iceServers }; virtual.configure?.(message.iceServers); updateRemotes(message.peers); mediaConfig(); }
+          if (message.type === 'joined') { cloudWelcome = { self: message.self, iceServers: message.iceServers }; virtual.configure?.(message.iceServers); updateRemotes(message.peers); mediaConfig(); }
+          else if (message.type === 'ice-config' && cloudWelcome) { cloudWelcome.iceServers = message.iceServers; virtual.configure?.(message.iceServers); mediaConfig(); }
         else if (message.type === 'peer-joined') { updateRemotes([...remotes.filter(p => p.id !== message.peer.id), message.peer]); send(renderer, message); }
         else if (message.type === 'peer-left') { virtual.peerRemove?.(message.id); remotes = remotes.filter(p => p.id !== message.id); publish(); send(renderer, message); }
         else if (message.type === 'control') command(message.data);

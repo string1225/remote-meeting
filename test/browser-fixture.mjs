@@ -4,8 +4,10 @@ import { createMeetingServer } from '../server/app.js';
 import { createHostService } from '../host/service.js';
 import { createVirtualCamera } from '../host/virtual-camera.js';
 import { createFakeCamera } from './fake-camera.js';
-export const launchOptions = { ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true };
-export const mediaLaunchOptions = { ...launchOptions, args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] };
+import { testRelay } from './relay-fixture.mjs';
+// Test TURN allocates loopback addresses; Chromium excludes these by default.
+export const launchOptions = { ...(process.env.BROWSER_PATH ? { executablePath: process.env.BROWSER_PATH } : {}), headless: true, args: ['--allow-loopback-in-peer-connection'] };
+export const mediaLaunchOptions = { ...launchOptions, args: [...launchOptions.args, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] };
 function pollState(page) {
   const wait = page.waitForFunction.bind(page);
   page.waitForFunction = (expression, arg, options = {}) => wait(expression, arg, { polling: 100, ...options });
@@ -26,20 +28,21 @@ export async function instrument(context) {
 }
 export async function localStack({ hardware = false, native = false, virtualCamera = {}, deviceSettingsFile } = {}) {
   const password = '12345678', agentKey = 'test-host-machine-key-32-characters-only';
-  const cloud = createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: password, HOST_AGENT_KEY: agentKey, USERS_FILE: ':memory:', ALLOWED_ORIGINS: '' });
+  const relay = await testRelay();
+  const cloud = createMeetingServer({ ...relay.env, BOOTSTRAP_ADMIN_PASSWORD: password, HOST_AGENT_KEY: agentKey, USERS_FILE: ':memory:', ALLOWED_ORIGINS: '' });
   cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening');
   const url = 'http://127.0.0.1:' + cloud.address().port + '/';
   let fake;
   const local = createHostService({ serverUrl: url, agentKey, mediaTest: !hardware && !native, deviceSettingsFile, virtualCamera: { ...virtualCamera, synthetic: native && !hardware } },
     hardware ? {} : native ? { cameraFactory: createVirtualCamera } : { cameraFactory: (config, publish) => { fake = createFakeCamera(config, publish); return fake; } });
   local.listen(0, '127.0.0.1'); await once(local, 'listening');
-  const hostBrowser = await chromium.launch(hardware || native ? { ...launchOptions, args: ['--autoplay-policy=no-user-gesture-required'] } : mediaLaunchOptions);
+  const hostBrowser = await chromium.launch(hardware || native ? { ...launchOptions, args: [...launchOptions.args, '--autoplay-policy=no-user-gesture-required'] } : mediaLaunchOptions);
   const context = await hostBrowser.newContext({ viewport: { width: 1280, height: 900 }, permissions: [] }); await instrument(context);
   const host = pollState(await context.newPage()), errors = [];
   host.on('pageerror', e => errors.push('host: ' + e.message));
   await host.goto('http://127.0.0.1:' + local.address().port + '/');
   await host.waitForFunction(() => document.querySelector('#connection').textContent.includes('在线'));
-  return { url, password, host, hostBrowser, local, errors, camera: fake, async close() { await hostBrowser.close(); await local.shutdown(); await cloud.shutdown(); } };
+  return { url, password, host, hostBrowser, local, errors, camera: fake, async close() { await hostBrowser.close(); await local.shutdown(); await cloud.shutdown(); await relay.close(); } };
 }
 export async function remotePage(browser, errors) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, permissions: ['camera', 'microphone'] }); await instrument(context);

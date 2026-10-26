@@ -31,7 +31,7 @@ export function createRtcWorker(config, publish) {
   function send(data) { ensure(); if (child?.stdin.writable) child.stdin.write(JSON.stringify(data) + '\n'); }
   function request(type, data = {}) { const requestId = randomUUID(); return new Promise((resolve, reject) => { requests.set(requestId, { resolve, reject, timer: setTimeout(() => { requests.delete(requestId); reject(new Error('本机设备操作超时，请重试')); }, 30000) }); send({ type, requestId, ...data }); }); }
   return {
-    configure(servers) { iceServers = servers || []; },
+    configure(servers) { iceServers = servers || []; if (child) send({ type: 'ice-config', iceServers }); },
     async listDevices() { return (await request('devices-list')).devices; },
     async applyDevices(next) { Object.assign(config, next); if (child) await request('devices-config', { config: next }); },
     start(output) { settings = output; send({ type: 'camera-start' }); },

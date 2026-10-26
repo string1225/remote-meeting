@@ -10,10 +10,11 @@ import { createHostService } from '../host/service.js';
 import { createMeetingServer } from '../server/app.js';
 import { createUserStore } from '../server/users.js';
 import { createFakeCamera } from './fake-camera.js';
+import { relayTestEnv } from './relay-fixture.mjs';
 
 const agentKey = 'local-account-test-machine-key-at-least-32-chars';
 async function fixture(t, file = ':memory:') {
-  const cloud = createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: 'admin-password', USERS_FILE: file, HOST_AGENT_KEY: agentKey, ALLOWED_ORIGINS: '', STUN_URLS: '' });
+  const cloud = createMeetingServer({ ...relayTestEnv, BOOTSTRAP_ADMIN_PASSWORD: 'admin-password', USERS_FILE: file, HOST_AGENT_KEY: agentKey, ALLOWED_ORIGINS: '' });
   cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening');
   const cloudUrl = `http://127.0.0.1:${cloud.address().port}`;
   const host = createHostService({ serverUrl: cloudUrl + '/', agentKey }, { cameraFactory: createFakeCamera });

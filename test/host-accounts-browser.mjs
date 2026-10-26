@@ -6,9 +6,10 @@ import { mediaLaunchOptions } from './browser-fixture.mjs';
 import { createHostService } from '../host/service.js';
 import { createMeetingServer } from '../server/app.js';
 import { createFakeCamera } from './fake-camera.js';
+import { relayTestEnv } from './relay-fixture.mjs';
 
 const agentKey = 'browser-account-test-machine-key-32-characters';
-const cloud = createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: 'test-admin-key', USERS_FILE: ':memory:', HOST_AGENT_KEY: agentKey, ALLOWED_ORIGINS: '', STUN_URLS: '' });
+const cloud = createMeetingServer({ ...relayTestEnv, BOOTSTRAP_ADMIN_PASSWORD: 'test-admin-key', USERS_FILE: ':memory:', HOST_AGENT_KEY: agentKey, ALLOWED_ORIGINS: '' });
 cloud.listen(0, '127.0.0.1'); await once(cloud, 'listening');
 const cloudUrl = `http://127.0.0.1:${cloud.address().port}/`;
 const local = createHostService({ serverUrl: cloudUrl, agentKey, mediaTest: true }, { cameraFactory: createFakeCamera }); local.listen(0, '127.0.0.1'); await once(local, 'listening');

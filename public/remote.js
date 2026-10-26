@@ -26,7 +26,7 @@ const media = new LocalMedia(async () => {
 }, message => notify(message + '。仍可接收现场画面和声音。', true));
 const players = remotePlayers({ mainVideo: $('host-video'), audioContainer: $('remote-audio'), playback, monitor, onChange: renderVideo });
 const signal = message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
-const rtc = new MeetingRTC({ channel: 'host-media', receive: true, send: signal, onTrack: (peer, track) => players.track(peer, track), onPeer: peer => { renderPeers(); renderVideo(); }, onRemove: peer => players.remove(peer), onError: error => notify('P2P 连接异常：' + error.message, true) });
+const rtc = new MeetingRTC({ channel: 'host-media', receive: true, send: signal, onTrack: (peer, track) => players.track(peer, track), onPeer: peer => { renderPeers(); renderVideo(); }, onRemove: peer => players.remove(peer), onError: error => notify('服务器转发连接异常：' + error.message, true) });
 const sender = new MeetingRTC({ channel: 'remote-media', receive: false, stream: media.stream, send: signal, onError: error => notify(error.message, true) });
 const closeFullscreen = pageFullscreen($('host-stage'), $('host-fullscreen'));
 function renderVideo() {
@@ -67,7 +67,7 @@ function renderPeers() {
   $('people-count').textContent = peers.filter(p => p.role === 'remote').length + ' / 2 位远端';
   $('participants').replaceChildren(...peers.map(peer => {
     const row = document.createElement('p'), link = rtc.peers.get(peer.id);
-    row.textContent = peer.name + ' · ' + (peer.id === self?.id ? '我' : link?.link || ({ connected: '音视频已连接', connecting: '正在连接音视频', failed: 'P2P 直连失败，请检查网络', disconnected: '正在重连' })[link?.state] || '已接入'); return row;
+    row.textContent = peer.name + ' · ' + (peer.id === self?.id ? '我' : link?.link || ({ connected: '音视频已连接', connecting: '正在连接音视频', failed: '服务器转发连接失败，请检查网络', disconnected: '正在重连' })[link?.state] || '已接入'); return row;
   }));
 }
 async function api(path, method = 'GET') {

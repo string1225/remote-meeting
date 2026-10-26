@@ -1,5 +1,5 @@
 [Unit]
-Description=Remote Meeting WebRTC signaling (no media relay)
+Description=Remote Meeting authenticated signaling for TURN relay media
 After=network.target
 
 [Service]

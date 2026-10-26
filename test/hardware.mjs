@@ -8,13 +8,13 @@ try {
  assert.equal(stack.local.hostStatus().capturing,false); assert.equal(stack.local.hostStatus().microphone,false);
  await remote.locator('#host-microphone-toggle').click(); await stack.host.waitForFunction(()=>hostDiagnostics().microphone&&!hostDiagnostics().capturing);
  await startCameras(remote);
- await remote.waitForFunction(()=>meetingStats().some(p=>p.receivedVideo>60&&p.receivedAudio>0&&p.transport==='p2p'),null,{timeout:45000});
+ await remote.waitForFunction(()=>meetingStats().some(p=>p.receivedVideo>60&&p.receivedAudio>0&&p.transport==='relay' && p.localCandidate==='relay' && p.remoteCandidate==='relay'),null,{timeout:45000});
  const before=await remote.evaluate(()=>({frames:document.querySelector('#host-video').getVideoPlaybackQuality().totalVideoFrames,time:performance.now()}));
  await remote.waitForFunction(time=>performance.now()-time>8000,before.time);
  const after=await remote.evaluate(()=>({frames:document.querySelector('#host-video').getVideoPlaybackQuality().totalVideoFrames,time:performance.now(),width:document.querySelector('#host-video').videoWidth,height:document.querySelector('#host-video').videoHeight,stats:meetingStats()}));
  assert.equal(after.width,1920);assert.equal(after.height,1080);
  await remote.locator('#camera-toggle').click();await remote.locator('#microphone-toggle').click();
- await stack.host.waitForFunction(()=>hostMediaStats().some(p=>p.receivedVideo>5&&p.receivedAudio>0&&p.transport==='p2p'));
+ await stack.host.waitForFunction(()=>hostMediaStats().some(p=>p.receivedVideo>5&&p.receivedAudio>0&&p.transport==='relay' && p.localCandidate==='relay' && p.remoteCandidate==='relay'));
  assert.deepEqual(await stack.host.evaluate(()=>testMediaRequests),[]);
  await setView(remote,0,2,0.25);await stack.host.waitForFunction(()=>hostDiagnostics().view.zoom===2);
  const audio=stack.local.hostStatus().microphoneStatus;assert.equal(audio.encodeRate,48000);assert.equal(audio.rtpClockRate,48000);assert.equal(audio.packetSamples,960);

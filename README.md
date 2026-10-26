@@ -1,4 +1,4 @@
-# 同屏 · P2P 网页会议
+# 同屏 · 服务器转发网页会议
 
 Windows 后端直接采集 USB 主摄像头、笔记本前置摄像头和话筒，合成 **1920×1080 / 30 fps**，通过 WebRTC 发送给远端。两路可独立设置左右镜像，画中画固定右下角，支持共享缩放与位置控制。现场网页接收远端的画面和声音。
 
@@ -16,31 +16,32 @@ Windows 后端直接采集 USB 主摄像头、笔记本前置摄像头和话筒�
 
 在现场控制台选择“摄像头视图”，展开“本机设备设置”，可选择主摄像头、画中画摄像头和麦克风，分别设置左右镜像。当前方向相对之前两路各翻转一次：主画面关闭镜像，画中画开启镜像。主次摄像头不能是同一设备。
 
-点击“保存并应用”后写入本机 .local/devices.json，重启服务后继续使用；此文件独立于含机器密钥的 host.json。读取列表、登录或保存均不自动打开已关闭的设备。修改已开启的设备时，仅重新连接发生变化的设备；P2P 连接保持。
+点击“保存并应用”后写入本机 .local/devices.json，重启服务后继续使用；此文件独立于含机器密钥的 host.json。读取列表、登录或保存均不自动打开已关闭的设备。修改已开启的设备时，仅重新连接发生变化的设备；转发连接保持。
 
 GET /api/devices 返回本地后端枚举和选择，PUT /api/devices/config 保存设置，二者要求同源请求和 X-Host-Console:1。设备未连接或设置无效时拒绝保存。
 
 ## 数据与性能
 
 ```text
-USB + 笔记本 → Python 原生采集 / 合成 → 一份 H264 编码 → WebRTC P2P → 远端网页
-现场话筒     → WASAPI / Opus 后端采集             → WebRTC P2P → 远端网页
-现场网页     ←                 WebRTC P2P         ← 远端摄像头 / 麦克风
+USB + 笔记本 → Python 原生采集 / 合成 → 一份 H264 编码 → 139 TURN 转发 → 远端网页
+现场话筒     → WASAPI / Opus 后端采集             → 139 TURN 转发 → 远端网页
+现场网页     ←                 139 TURN 转发      ← 远端摄像头 / 麦克风
 双方控制     ↔ 139 HTTPS/WSS：账号、开关、缩放、SDP / ICE
 ```
 
-- 139 只处理账号、控制和连接协商。音视频走双方直接的加密 WebRTC 连接，无 WSS 媒体分片或 MediaSource 缓冲。
+- 139 处理账号、控制、连接协商，并通过专用 coturn 转发双向音视频。WebRTC 媒体保持端到端加密，无 WSS 媒体分片或 MediaSource 缓冲。
 - 现场网页的 Permissions-Policy 禁止摄像头和麦克风，代码不调用 getUserMedia 或 enumerateDevices。现场预览通过后端本地 JPEG 接口低频刷新，预览图像不会发送给云端。
 - 原生后端使用 OpenCV / DirectShow 采集两只摄像头，目标分别为 ≤1920×1080/30 和 ≤640×480/30，每只只保留最新帧。
 - 首选 Intel Quick Sync H264 硬件编码，失败时回退 libx264。两位远端共用一份 H264 编码和一份 Opus 编码；每位远端有自己的 WebRTC 加密连接。没有虚拟摄像头读取及现场浏览器重复编码。
 - 默认视频码率约 3 Mbps，现场音频单声道 48 kHz / Opus 48 kbps。远端自身视频上限 640×480 / 15 fps，约 600 kbps。实际帧率受硬件及网络影响，状态包含 measuredFps、encoder 和 encodeMs。
 - 话筒优先使用 Windows 默认 WASAPI 输入，也可在本机设备设置中选择。按设备原生采样率和声道回调采集，再明确重采样、混音为 48 kHz 单声道 Opus；每包 960 采样 / 20 ms，RTP 时钟固定 48 kHz。采集队列有上限，过载时丢弃陈旧数据并保留真实采集时间戳，不积压或放慢声音。现场页面显示采集格式、编码频率和包频率。后端不包含浏览器的回声消除；同处一室或扬声器回传时可使用耳机。
-- STUN 只用于探测公网地址，不能代替直连。若双方网络阻止 P2P，页面会显示连接失败；当前不自动回退媒体中转。连接状态和浏览器 getStats 中可以检查 P2P / 候选地址及丢包情况。
+- 浏览器强制 iceTransportPolicy=relay，原生后端在 ICE 收集前设置 aioice 的 RELAY 策略；信令还会过滤 host / srflx / prflx 候选。TURN 不可用时连接失败，不回退 P2P。getStats 的 localCandidate 和 remoteCandidate 应均为 relay。
+- 云端用 TURN_SECRET 签发 9 小时有效的 coturn REST 凭据，覆盖最长 8 小时登录会话；共享密钥只保存在服务器。每次远端入会前刷新主机配置，已运行的 Python 后端也会接收更新，避免闲置后使用过期凭据。
 - 不录制或保存媒体。后端与本地页面之间的预览和媒体发送队列都有上限。
 
 ## 本地安装
 
-需要 Windows、Node.js 22+、Python 3.12+ 和 Edge / Chrome。当前 P2P 模式不需要安装虚拟摄像头驱动，也不会使用 OBS 的设备。
+需要 Windows、Node.js 22+、Python 3.12+ 和 Edge / Chrome。当前转发模式不需要安装虚拟摄像头驱动，也不会使用 OBS 的设备。
 
 ```powershell
 npm ci
@@ -63,15 +64,19 @@ Startup 中的 Remote Meeting Host.lnk 启动隐藏监督进程，意外退出�
 
 ## 账号与安全
 
-本地人员配置可保存姓名、账号和独立口令；最多两位远端同时接入。修改账号、重置密钥、停用或删除会撤销对应人员的登录和 P2P 协商连接，不影响其他人员。
+本地人员配置可保存姓名、账号和独立口令；最多两位远端同时接入。修改账号、重置密钥、停用或删除会撤销对应人员的登录和媒体协商连接，不影响其他人员。
 
 网页登录有效 8 小时，使用 HttpOnly / SameSite=Strict / HTTPS Secure Cookie，票据绑定登录会话。账号文件只保存加盐 scrypt 哈希。主机管理 API 仅允许回环同源请求并验证专用头；机器凭据不进入网页。
 
-信令只允许现场与远端交换，并验证频道、SDP 大小、ICE 字段、消息频率。远端之间不能互发信令。云端无音视频接收 / 转发入口。
+信令只允许现场与远端交换，并验证频道、SDP 大小、ICE 字段、消息频率。远端之间不能互发信令。媒体由独立 coturn 服务转发；Node 信令服务不接收媒体内容。
 
 ## 云端部署
 
-复用阿里云 139.224.12.141 的 Nginx、HTTPS 域名和证书，地址为 https://home.sunny-string.cn/meeting/。Node 监听 127.0.0.1:3033。STUN_URLS 可配置逗号分隔的 STUN 地址，例如 stun:stun.cloudflare.com:3478；测试可留空。不要配置 relay-only 或 TURN 媒体转发。
+复用阿里云 139.224.12.141 的 Nginx、HTTPS 域名和证书，地址为 https://home.sunny-string.cn/meeting/。Node 监听 127.0.0.1:3033。音视频强制经该机器的 coturn 服务转发，不再使用 STUN_URLS 或 P2P。
+
+deploy/install.sh 会调用恢复自本项目已有部署归档的 deploy/install-turn.sh：复用 /opt/remote-meeting/turn/4.18.0，缺失时按固定源码校验和编译；启动 remote-meeting-turn.service，并在 /etc/remote-meeting.env 生成或保留 TURN_SECRET，配置 TURN_URLS 和 ICE_TRANSPORT_POLICY=relay。密钥与 coturn static-auth-secret 保持一致，不写入发布包。TURN_URLS / TURN_SECRET 缺失或策略非 relay 时应用拒绝启动。
+
+服务器安全组和本机防火墙必须允许 TCP/UDP 3478 及 UDP 50000–50127；脚本不改动其他服务或云安全组。TURN 客户端可使用 UDP 或 TCP 连接，转发端使用 UDP。TURN_PUBLIC_IP 默认使用已确认的 139.224.12.141；私网地址从 eth0 获取，可用 TURN_PRIVATE_IP 指定实际值。发布前应通过 SSH 核对现有服务、地址和端口；不可用时不能将代码检查通过视为线上已切换。
 
 ```sh
 git archive --format=tar.gz --output=release.tar.gz HEAD
@@ -79,7 +84,7 @@ scp release.tar.gz aliyun-remote-meeting:/tmp/remote-meeting-release.tar.gz
 ssh -T aliyun-remote-meeting 'mkdir -p /opt/remote-meeting/releases/<sha>; tar -xzf /tmp/remote-meeting-release.tar.gz -C /opt/remote-meeting/releases/<sha>; bash /opt/remote-meeting/releases/<sha>/deploy/install.sh'
 ```
 
-只更新 remote-meeting 服务与已有站点的 /meeting/ include，不重启整个 Nginx。账号文件 /var/lib/remote-meeting/users.json 与 /etc/remote-meeting.env 独立于发布目录，升级保留；配置仅 root 可读。健康接口返回 {"status":"ok","mode":"web-meeting","transport":"p2p"}。发布后远端重新登录，本机主动重连。
+更新 remote-meeting、专用 remote-meeting-turn 服务与已有站点的 /meeting/ include，不重启整个 Nginx。账号文件 /var/lib/remote-meeting/users.json 与 /etc/remote-meeting.env 独立于发布目录，升级保留；配置仅 root 可读。健康接口返回 {"status":"ok","mode":"web-meeting","transport":"relay"}。该接口仅证明应用配置，仍须验证真实媒体的 relay 候选和双向解码。发布后重启 Windows 本地 host/index.js 和现场页面，远端刷新并重新登录；已建立的旧 P2P 连接必须断开重建。
 
 ## 验证
 
@@ -92,12 +97,14 @@ npm run test:accounts
 npm run test:host-accounts
 .local/virtual-camera/Scripts/python.exe test/native-camera.test.py
 .local/virtual-camera/Scripts/python.exe test/audio-capture.test.py
+.local/virtual-camera/Scripts/python.exe test/native-relay.test.py
+node test/relay-browser.mjs
 node test/device-settings-browser.mjs
 # 以下验收打开真实设备，需先关闭另一份本地采集
 node test/hardware.mjs
 ```
 
-BROWSER_PATH 可指定 Edge。浏览器回归使用原生合成测试画面和测试声音，验证登录不开设备、独立手动开关、双向 P2P 解码与音量、现场网页零采集、关闭页面仍发送、重连、两人同步控制和账号撤销；UI 覆盖桌面、320/390 px、网页全屏 / Esc、缩放与草稿保留。只保存合成截图到忽略的 test-results/；真实设备验收不保存图像。
+BROWSER_PATH 可指定 Edge。浏览器回归启动仅监听回环的认证测试 TURN 服务（node-turn 仅为开发依赖，生产使用 coturn），使用原生合成测试画面和测试声音，验证登录不开设备、独立手动开关、双向 relay 候选、解码与音量、现场网页零采集、关闭页面仍发送、重连、两人同步控制和账号撤销。relay-browser.mjs 和 native-relay.test.py 验证 TURN 不可达时不产生直连候选。UI 覆盖桌面、320/390 px、网页全屏 / Esc、缩放与草稿保留。只保存合成截图到忽略的 test-results/；真实设备验收不保存图像。
 
 ## 开发
 

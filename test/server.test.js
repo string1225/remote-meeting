@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { createMeetingServer } from '../server/app.js';
+import { relayTestEnv } from './relay-fixture.mjs';
 
 const password = '12345678', agentKey = 'test-machine-key-only-32-characters-long';
 async function fixture(t, options = {}) {
-  const server = createMeetingServer({ BOOTSTRAP_ADMIN_PASSWORD: password, USERS_FILE: ':memory:', HOST_AGENT_KEY: agentKey, ALLOWED_ORIGINS: '', STUN_URLS: '', ...options });
+  const server = createMeetingServer({ ...relayTestEnv, BOOTSTRAP_ADMIN_PASSWORD: password, USERS_FILE: ':memory:', HOST_AGENT_KEY: agentKey, ALLOWED_ORIGINS: '', ...options });
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); t.after(() => server.shutdown());
   const url = `http://127.0.0.1:${server.address().port}`;
   const request = (path, method = 'GET', data, cookie = '', origin = url) => fetch(`${url}/api/${path}`, { method, headers: { Origin: origin, Cookie: cookie, 'Content-Type': 'application/json' }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
@@ -56,7 +57,10 @@ test('two authenticated control panels, isolated tickets and validated camera co
   ar.send({ type: 'control', data: { type: 'viewport', camera: 0, zoom: 2, x: 0, y: 1, media: 'ignored' } });
   const command = await host.next('control'); assert.equal(command.from, aj.self.id);
   assert.deepEqual(command.data, { type: 'viewport', camera: 0, zoom: 2, x: 0.25, y: 0.75 });
-  assert.equal(aj.mediaTransport, 'p2p');
+  assert.equal(aj.mediaTransport, 'relay');
+  assert.equal(aj.iceTransportPolicy, 'relay');
+  assert.equal(JSON.stringify(aj).includes(relayTestEnv.TURN_SECRET), false);
+  assert.equal((await (await f.request('health')).json()).transport, 'relay');
   host.send({ type: 'host-state', state: 'capturing', cameras: [{ width: 3840, height: 2160, label: 'Camera 1' }] });
   assert.equal((await ar.next('host-state')).cameras[0].width, 3840);
   ar.send({ type: 'host-state', state: 'error', message: 'spoofed' });
@@ -104,12 +108,12 @@ test('account roles and password reset disconnect only that user, preserving the
   await f.request('logout', 'POST', undefined, admin); await b.next('ended'); assert.equal((await f.reserve(admin)).status, 401);
 });
 
-test('login throttle and secure scoped cookie; P2P uses authenticated signaling', async t => {
+test('login throttle and secure scoped cookie; relay uses authenticated signaling', async t => {
   const f = await fixture(t, { TRUST_PROXY: 'true', COOKIE_PATH: '/meeting/' });
   const response = await fetch(`${f.url}/api/login`, { method: 'POST', headers: { Origin: f.url, 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https' }, body: JSON.stringify({ username: 'admin', password }) });
   assert.match(response.headers.get('set-cookie'), /Path=\/meeting\/; HttpOnly; SameSite=Strict; Max-Age=28800; Secure/);
   const host = await f.client({ agent: true }); const joined = await host.next('joined');
-  assert.equal(joined.mediaTransport, 'p2p');
+  assert.equal(joined.mediaTransport, 'relay');
   for (let i = 0; i < 10; i++) assert.equal((await f.login('admin', 'wrong')).status, 401);
   assert.equal((await f.login()).status, 429);
 });
@@ -121,7 +125,7 @@ test('duplex media permissions and live playback assets', async t => {
   for (const path of ['rtc.js', 'media.js', 'audio-meter.js', 'playback-controls.js']) assert.equal((await fetch(f.url + '/' + path)).status, 200);
 });
 
-test('P2P signaling is restricted to the host; camera and microphone commands are independent', async t => {
+test('relay signaling is restricted to the host; camera and microphone commands are independent', async t => {
  const f=await fixture(t), host=await f.client({agent:true}), hj=await host.next('joined');
  const cookie=cookieOf(await f.login()), {ticket}=await(await f.reserve(cookie)).json();
  const remote=await f.client({cookie,ticket}), rj=await remote.next('joined');

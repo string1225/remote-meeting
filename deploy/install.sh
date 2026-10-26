@@ -42,6 +42,10 @@ if ! grep -q '^HOST_AGENT_KEY=' /etc/remote-meeting.env; then
     unset host_agent_key
 fi
 chmod 600 /etc/remote-meeting.env
+# Reuse the project's dedicated coturn deployment and preserve its REST secret.
+# Do this before switching releases so a failed relay setup leaves the app live.
+bash deploy/install-turn.sh
+systemctl is-active --quiet remote-meeting-turn
 mkdir -p /etc/nginx/snippets /opt/remote-meeting/backups
 stamp="$(date +%Y%m%d%H%M%S)"
 cp -a "$site_config" "/opt/remote-meeting/backups/nginx-$stamp.conf"
@@ -72,7 +76,7 @@ systemctl enable remote-meeting >/dev/null
 systemctl restart remote-meeting
 healthy=false
 for attempt in $(seq 1 15); do
-    if curl --fail --silent http://127.0.0.1:3033/api/health; then healthy=true; break; fi
+    if curl --fail --silent http://127.0.0.1:3033/api/health | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{const h=JSON.parse(s);process.exit(h.status==="ok"&&h.transport==="relay"?0:1)}catch{process.exit(1)}})'; then healthy=true; break; fi
     sleep 1
 done
 if [[ "$healthy" != true ]]; then

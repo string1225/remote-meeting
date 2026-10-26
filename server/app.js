@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { createHub } from './hub.js';
 import { createUserStore } from './users.js';
 import { authenticateAgent } from './agent-auth.js';
+import { createRelayConfig } from './relay.js';
 
 const token = () => randomBytes(24).toString('base64url');
 const split = value => (value || '').split(',').map(v => v.trim()).filter(Boolean);
@@ -12,13 +13,13 @@ for (const [path, type] of [['rtc.js', 'text/javascript'], ['media.js', 'text/ja
 
 export function createMeetingServer(options = {}) {
   const env = { ...process.env, ...options };
+  const relayConfig = createRelayConfig(env);
   const users = createUserStore({ file: env.USERS_FILE, bootstrapPassword: env.BOOTSTRAP_ADMIN_PASSWORD || env.ADMIN_KEY, bootstrapUsername: env.BOOTSTRAP_ADMIN_USERNAME || 'admin' });
   const sessions = new Map();
   const sessionTTL = 8 * 3600_000;
   const cookiePath = env.COOKIE_PATH || '/';
   if (!/^\/[A-Za-z0-9/_-]*$/.test(cookiePath)) throw new Error('Invalid COOKIE_PATH');
   const allowedOrigins = split(env.ALLOWED_ORIGINS);
-  const iceServers = split(env.STUN_URLS).map(url => { if (!/^stuns?:/.test(url)) throw new Error('STUN_URLS accepts address discovery servers only'); return { urls: url }; });
   const ttl = Number(env.ROOM_TTL_HOURS || 8) * 3600_000;
   if (!Number.isFinite(ttl) || ttl <= 0 || ttl > 86400_000) throw new Error('ROOM_TTL_HOURS must be between 0 and 24.');
   const limits = new Map();
@@ -70,7 +71,7 @@ export function createMeetingServer(options = {}) {
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'self' blob:; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
     try {
       const path = new URL(req.url, 'http://localhost').pathname;
-      if (req.method === 'GET' && path === '/api/health') return json(res, 200, { status: 'ok', mode: 'web-meeting', transport: 'p2p' });
+      if (req.method === 'GET' && path === '/api/health') return json(res, 200, { status: 'ok', mode: 'web-meeting', transport: 'relay' });
       // Machine-authenticated management is scoped to remote accounts. The key
       // stays in the local Node service; browser sessions cannot use this route.
       if (path === '/api/agent/users' || path.startsWith('/api/agent/users/')) {
@@ -155,7 +156,7 @@ export function createMeetingServer(options = {}) {
   });
   server.headersTimeout = 15_000;
   server.requestTimeout = 15_000;
-  const hub = createHub(server, { hostKey: env.HOST_AGENT_KEY, sessionFor, originAllowed, rate, address, iceServers, reconnectMs: Number(env.RECONNECT_GRACE_MS || 30000) });
+  const hub = createHub(server, { hostKey: env.HOST_AGENT_KEY, sessionFor, originAllowed, rate, address, relayConfig, reconnectMs: Number(env.RECONNECT_GRACE_MS || 30000) });
   const cleanup = setInterval(() => {
     for (const [key, session] of sessions) if (session.expiresAt < Date.now()) { sessions.delete(key); hub.revokeSession(key); }
     for (const [key, entry] of limits) if (entry.until < Date.now()) limits.delete(key);
