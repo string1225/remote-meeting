@@ -1,0 +1,23 @@
+[Unit]
+Description=Shared HTTPS and Remote Meeting TURN TLS on port 443
+After=network.target nginx.service remote-meeting-turn.service
+Wants=nginx.service remote-meeting-turn.service
+
+[Service]
+Type=notify
+RuntimeDirectory=remote-meeting-tls
+ExecStart=/usr/sbin/haproxy -Ws -f /etc/remote-meeting/tls.cfg -p /run/remote-meeting-tls/haproxy.pid
+ExecReload=/usr/sbin/haproxy -c -f /etc/remote-meeting/tls.cfg
+ExecReload=/bin/kill -USR2 $MAINPID
+Restart=on-failure
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/remote-meeting-tls
+
+[Install]
+WantedBy=multi-user.target

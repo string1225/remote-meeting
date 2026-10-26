@@ -46,6 +46,7 @@ chmod 600 /etc/remote-meeting.env
 # Do this before switching releases so a failed relay setup leaves the app live.
 bash deploy/install-turn.sh
 systemctl is-active --quiet remote-meeting-turn
+bash deploy/install-tls.sh
 mkdir -p /etc/nginx/snippets /opt/remote-meeting/backups
 stamp="$(date +%Y%m%d%H%M%S)"
 cp -a "$site_config" "/opt/remote-meeting/backups/nginx-$stamp.conf"

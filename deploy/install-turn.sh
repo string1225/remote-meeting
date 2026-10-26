@@ -4,9 +4,11 @@ set -euo pipefail
 version=4.18.0
 archive_sha=28d55294ac596fbd129b293a85e7bb1c5dc4bd15b7fb55c500f355149e5f4e28
 public_ip="${TURN_PUBLIC_IP:-139.224.12.141}"
+tls_host="${TURN_TLS_HOST:-home.sunny-string.cn}"
 private_ip="${TURN_PRIVATE_IP:-$(ip -4 -o addr show dev eth0 scope global | awk '{print $4}' | cut -d/ -f1 | head -1)}"
 prefix="/opt/remote-meeting/turn/$version"
 [[ "$public_ip" =~ ^[0-9.]+$ && "$private_ip" =~ ^[0-9.]+$ ]] || { echo 'Explicit IPv4 relay addresses are required.'; exit 1; }
+[[ "$tls_host" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo 'An HTTPS hostname is required for TURN TLS.'; exit 1; }
 if [[ ! -x "$prefix/bin/turnserver" ]]; then
   dnf install -y gcc make libevent-devel openssl-devel sqlite-devel
   mkdir -p /opt/remote-meeting/turn/build
@@ -21,14 +23,14 @@ if [[ ! -x "$prefix/bin/turnserver" ]]; then
 fi
 id remote-meeting-turn >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --shell /sbin/nologin remote-meeting-turn
 install -d -m 750 -o root -g remote-meeting-turn /etc/remote-meeting
-TURN_SETUP_PUBLIC="$public_ip" TURN_SETUP_PRIVATE="$private_ip" python3 - <<'PY'
+TURN_SETUP_PUBLIC="$public_ip" TURN_SETUP_PRIVATE="$private_ip" TURN_SETUP_TLS_HOST="$tls_host" python3 - <<'PY'
 import os, pathlib, secrets, grp
 env_path=pathlib.Path('/etc/remote-meeting.env')
 lines=env_path.read_text().splitlines()
 values=dict(line.split('=',1) for line in lines if '=' in line and not line.startswith('#'))
 secret=values.get('TURN_SECRET') or secrets.token_hex(32)
 public=os.environ['TURN_SETUP_PUBLIC']; private=os.environ['TURN_SETUP_PRIVATE']
-updates={'TURN_URLS':f'turn:{public}:3478?transport=udp,turn:{public}:3478?transport=tcp','TURN_SECRET':secret,'ICE_TRANSPORT_POLICY':'relay','STUN_URLS':''}
+updates={'TURN_URLS':f'turns:{os.environ["TURN_SETUP_TLS_HOST"]}:443?transport=tcp','TURN_SECRET':secret,'ICE_TRANSPORT_POLICY':'relay','STUN_URLS':''}
 lines=[line for line in lines if line.split('=',1)[0] not in updates]
 env_path.write_text('\n'.join(lines+[key+'='+value for key,value in updates.items()])+'\n');env_path.chmod(0o600)
 config=pathlib.Path('/etc/remote-meeting/turnserver.conf')
@@ -83,4 +85,4 @@ systemctl daemon-reload
 systemctl enable remote-meeting-turn >/dev/null
 systemctl restart remote-meeting-turn
 systemctl is-active remote-meeting-turn
-printf 'TURN configured at %s:3478 TCP/UDP, relay UDP 50000-50127.\n' "$public_ip"
+printf 'TURN internal listener configured; public client transport is TLS %s:443.\n' "$tls_host"

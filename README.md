@@ -56,6 +56,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File host/install.ps1
 
 在 .local/host.json 设置 serverUrl、agentKey、nodePath、browserPath。serverUrl 使用云端 /meeting/ 地址，agentKey 与 HOST_AGENT_KEY 相同。cameras 顺序为 USB、笔记本前置；空数组自动识别。output 默认 {"width":1920,"fps":30}。rtc.pythonPath 可指定 Python；rtc.encoder 可设 auto、h264_qsv 或 libx264，默认 auto。headless:false 显示现场窗口。
 
+更新后可在已登录 Windows 桌面中双击 `host/restart.cmd`，自动核对并关闭旧主机进程树，重新启动常驻程序和现场窗口；服务账号无权关闭其他用户的进程时，不要反复重试同一命令。
+
 本地服务仅监听 127.0.0.1:3034。/api/status 返回状态，/api/preview 返回最新现场预览。POST /api/devices/camera 或 /api/devices/microphone，JSON 为 {"enabled":true/false}，需要同源 Origin、Content-Type:application/json 和 X-Host-Console:1。远端通过已认证的云端控制连接调用同一后端控制逻辑。机器凭据不进入浏览器。
 
 Startup 中的 Remote Meeting Host.lnk 启动隐藏监督进程，意外退出会恢复服务。现场窗口关闭后自动重开。日志在 .local/host.log，取消自启动时只删除本服务的专用快捷方式。
@@ -76,7 +78,9 @@ Startup 中的 Remote Meeting Host.lnk 启动隐藏监督进程，意外退出�
 
 deploy/install.sh 会调用恢复自本项目已有部署归档的 deploy/install-turn.sh：复用 /opt/remote-meeting/turn/4.18.0，缺失时按固定源码校验和编译；启动 remote-meeting-turn.service，并在 /etc/remote-meeting.env 生成或保留 TURN_SECRET，配置 TURN_URLS 和 ICE_TRANSPORT_POLICY=relay。密钥与 coturn static-auth-secret 保持一致，不写入发布包。TURN_URLS / TURN_SECRET 缺失或策略非 relay 时应用拒绝启动。
 
-服务器安全组和本机防火墙必须允许 TCP/UDP 3478 及 UDP 50000–50127；脚本不改动其他服务或云安全组。TURN 客户端可使用 UDP 或 TCP 连接，转发端使用 UDP。TURN_PUBLIC_IP 默认使用已确认的 139.224.12.141；私网地址从 eth0 获取，可用 TURN_PRIVATE_IP 指定实际值。发布前应通过 SSH 核对现有服务、地址和端口；不可用时不能将代码检查通过视为线上已切换。
+公网入口只使用已有的 TCP 443：浏览器和原生后端连接 `turns:home.sunny-string.cn:443?transport=tcp`。`deploy/install-tls.sh` 使用 HAProxy 终止 TLS，根据解密后的 STUN magic cookie 区分 TURN 与 HTTPS；普通 HTTPS（包括没有 ALPN 的客户端）继续交给 Nginx。Nginx 的 HTTPS 上游只监听 `127.0.0.1:8443`，通过 PROXY v2 保留原客户端地址，原有站点、路由与证书继续使用。coturn 的 3478 和 UDP relay 端口只供服务器内部转发，不要求向公网放行额外端口。证书续期 hook 会同步并重载共享 TLS 入口。
+
+TURN_PUBLIC_IP 默认使用已确认的 139.224.12.141；私网地址从 eth0 获取，可用 TURN_PRIVATE_IP 指定实际值。TURN_TLS_HOST 默认使用 home.sunny-string.cn。发布前核对现有服务、证书、地址和端口；发布后仍需验证公网 443 上的双向媒体解码，不能只看健康接口。
 
 ```sh
 git archive --format=tar.gz --output=release.tar.gz HEAD
@@ -84,7 +88,7 @@ scp release.tar.gz aliyun-remote-meeting:/tmp/remote-meeting-release.tar.gz
 ssh -T aliyun-remote-meeting 'mkdir -p /opt/remote-meeting/releases/<sha>; tar -xzf /tmp/remote-meeting-release.tar.gz -C /opt/remote-meeting/releases/<sha>; bash /opt/remote-meeting/releases/<sha>/deploy/install.sh'
 ```
 
-更新 remote-meeting、专用 remote-meeting-turn 服务与已有站点的 /meeting/ include，不重启整个 Nginx。账号文件 /var/lib/remote-meeting/users.json 与 /etc/remote-meeting.env 独立于发布目录，升级保留；配置仅 root 可读。健康接口返回 {"status":"ok","mode":"web-meeting","transport":"relay"}。该接口仅证明应用配置，仍须验证真实媒体的 relay 候选和双向解码。发布后重启 Windows 本地 host/index.js 和现场页面，远端刷新并重新登录；已建立的旧 P2P 连接必须断开重建。
+更新 remote-meeting、专用 remote-meeting-turn、remote-meeting-tls 服务与已有站点的 /meeting/ include，通过 reload 应用 Nginx 配置。账号文件 /var/lib/remote-meeting/users.json 与 /etc/remote-meeting.env 独立于发布目录，升级保留；配置仅 root 可读。健康接口返回 {"status":"ok","mode":"web-meeting","transport":"relay"}。该接口仅证明应用配置，仍须验证真实媒体的 relay 候选和双向解码。发布后重启 Windows 本地 host/index.js 和现场页面，远端刷新并重新登录；已建立的旧 P2P 连接必须断开重建。
 
 ## 验证
 
