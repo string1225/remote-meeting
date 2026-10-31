@@ -6,6 +6,7 @@
 .host-console nav{padding:4px;border:1px solid var(--line);border-radius:12px;background:white}
 .host-console nav button{padding:10px 12px;background:transparent;font-size:12px}
 .host-console nav button[aria-pressed="true"]{background:#e5f3ef;color:var(--teal)}
+.host-console .host-meeting-grid{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
 .host-camera-view{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 .host-camera-view>header{flex-shrink:0}
 .host-camera-view>main{width:100%;flex:1;min-height:0;display:flex;flex-direction:column;margin:0;gap:14px}
@@ -34,3 +35,9 @@
 @media(max-width:600px){.host-console>header{padding:0 14px}.host-console .brand{font-size:18px}.host-console>main{padding:16px 12px}.host-camera-view{height:auto;min-height:100dvh;overflow:auto}.host-live-grid{grid-template-columns:1fr}.host-camera-panel .host-sources,.host-camera-panel .video-grid{grid-template-rows:none}.host-camera-panel .video-card{aspect-ratio:16/9}.host-console .meeting-top h1{font-size:21px}.host-console .meeting-top h1 span{font-size:11px;margin-left:4px}}
 
 .device-settings{padding:16px}.device-settings summary{cursor:pointer;font-weight:600}.device-settings form{margin-top:18px}.device-settings fieldset{border:0;padding:0;margin:0;min-width:0}.device-select-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.device-select-grid label{min-width:0}.device-select-grid select{width:100%;min-width:0}.device-mirrors{display:flex;gap:22px;flex-wrap:wrap;margin:16px 0}.device-mirrors label{display:flex;align-items:center;gap:8px}.device-mirrors input{width:auto;margin:0}.device-settings .account-actions{flex-wrap:wrap}@media(max-width:760px){.device-select-grid{grid-template-columns:1fr}.device-settings{padding:14px}}
+.device-settings-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:16px}
+.device-settings-row .device-mirrors{flex:0 0 auto;max-width:100%;margin:0}
+.device-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;flex:0 0 280px}
+.device-actions button{min-height:44px;padding:10px 14px;white-space:nowrap}
+.device-settings-row #device-message{flex:1;min-width:180px;margin:0;font-size:12px;line-height:1.6}
+@media(max-width:760px){.host-console .host-meeting-grid{grid-template-columns:1fr}.device-settings-row .device-mirrors,.device-actions,.device-settings-row #device-message{flex-basis:100%}.device-actions{min-width:0}}

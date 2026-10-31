@@ -17,7 +17,6 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
   let renderer, cloud, reconnectTimer, attempt = 0, paused = false, stopping = false, remotes = [], cameras = [], view = { zoom: 1, x: 0.5, y: 0.5 }, virtualStatus = { state: 'stopped' };
   let cloudWelcome, mediaStatus = { video: false, audio: false, error: '' };
   let microphoneStatus = { state: 'stopped' };
-  const closeMedia = () => { for (const peer of remotes) virtual.peerRemove?.(peer.id); };
   const output = compositeSettings(config.output);
   const deviceSettings = createDeviceSettings({ file: config.deviceSettingsFile, fallback: config });
   let deviceSaving = false;
@@ -136,6 +135,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
     const previous = remotes; remotes = next.filter(p => p.role === 'remote');
     for (const peer of previous) if (!remotes.some(p => p.id === peer.id)) virtual.peerRemove?.(peer.id);
     for (const peer of remotes) virtual.peerAdd?.(peer.id);
+    if (previous.length && !remotes.length) void virtual.stop();
     publish();
   }
   function connectCloud() {
@@ -151,7 +151,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
           if (message.type === 'joined') { cloudWelcome = { self: message.self, iceServers: message.iceServers }; virtual.configure?.(message.iceServers); updateRemotes(message.peers); mediaConfig(); }
           else if (message.type === 'ice-config' && cloudWelcome) { cloudWelcome.iceServers = message.iceServers; virtual.configure?.(message.iceServers); mediaConfig(); }
         else if (message.type === 'peer-joined') { updateRemotes([...remotes.filter(p => p.id !== message.peer.id), message.peer]); send(renderer, message); }
-        else if (message.type === 'peer-left') { virtual.peerRemove?.(message.id); remotes = remotes.filter(p => p.id !== message.id); publish(); send(renderer, message); }
+        else if (message.type === 'peer-left') { updateRemotes(remotes.filter(p => p.id !== message.id)); send(renderer, message); }
         else if (message.type === 'control') command(message.data);
         else if (message.type === 'signal') { if (message.channel === 'host-media') { if (message.data.restart) { virtual.peerRemove?.(message.from); virtual.peerAdd?.(message.from); } else virtual.signal?.(message.from, message.data); } else send(renderer, message); }
       } catch { /* Cloud only sends validated JSON controls. */ }
@@ -159,12 +159,12 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
     ws.on('error', () => {});
     ws.on('close', () => {
       if (ws !== cloud) return;
-      cloud = null; cloudWelcome = null; closeMedia(); remotes = []; send(renderer, { type: 'media-disconnected' }); publish();
+      cloud = null; cloudWelcome = null; updateRemotes([]); send(renderer, { type: 'media-disconnected' });
       reconnectTimer = setTimeout(connectCloud, Math.min(1000 * 2 ** attempt++, 15000));
     });
   }
   function disconnectCloud() {
-    clearTimeout(reconnectTimer); const old = cloud; cloud = null; cloudWelcome = null; old?.terminate(); closeMedia(); remotes = []; send(renderer, { type: 'media-disconnected' }); publish();
+    clearTimeout(reconnectTimer); const old = cloud; cloud = null; cloudWelcome = null; old?.terminate(); updateRemotes([]); send(renderer, { type: 'media-disconnected' });
   }
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
   server.on('upgrade', (req, socket, head) => {
@@ -189,7 +189,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
     ws.on('close', () => { if (renderer === ws) { renderer = null; send(cloud, { type: 'media-reset' }); publish(); } });
   });
   server.on('listening', connectCloud);
-  server.shutdown = async () => { stopping = true; disconnectCloud(); renderer?.terminate(); closeMedia(); if (virtual.shutdown) await virtual.shutdown(); else await virtual.stop(); wss.close(); await new Promise(resolve => server.close(resolve)); };
+  server.shutdown = async () => { stopping = true; disconnectCloud(); renderer?.terminate(); if (virtual.shutdown) await virtual.shutdown(); else await virtual.stop(); wss.close(); await new Promise(resolve => server.close(resolve)); };
   server.hostStatus = status;
   return server;
 }

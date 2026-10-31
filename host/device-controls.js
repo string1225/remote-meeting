@@ -1,5 +1,6 @@
 const $ = id => document.getElementById(id);
 let loaded = false, loading = false;
+function setDisabled(value) { for (const id of ['device-fields', 'device-mirror-fields', 'save-devices']) $(id).disabled = value; }
 function message(text, failed = false) { $('device-message').textContent = text; $('device-message').className = failed ? 'error' : 'hint'; }
 function fill(select, entries, chosen) {
   select.replaceChildren(...entries.map(({ value, label }) => { const option = document.createElement('option'); option.value = value; option.textContent = label; return option; }));
@@ -11,7 +12,7 @@ async function request(path, method = 'GET', data) {
   const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
 }
 async function refresh() {
-  if (loading) return; loading = true; $('device-fields').disabled = true; message('正在读取本机设备…');
+  if (loading) return; loading = true; setDisabled(true); message('正在读取本机设备…');
   try {
     const { devices, settings } = await request('/api/devices');
     const cameras = [{ value: '', label: '自动识别' }, ...devices.cameras.map(name => ({ value: name, label: name }))];
@@ -21,7 +22,7 @@ async function refresh() {
     $('mirror-main').checked = settings.mirrorMain; $('mirror-secondary').checked = settings.mirrorSecondary;
     loaded = true; message('配置保存在本机文件中，重启后保留。读取列表不会开启设备。');
   } catch (error) { message(error.message, true); }
-  finally { loading = false; $('device-fields').disabled = !loaded; }
+  finally { loading = false; setDisabled(!loaded); }
 }
 $('device-settings').addEventListener('toggle', () => { if ($('device-settings').open && !loaded) void refresh(); });
 $('refresh-devices').onclick = () => void refresh();
@@ -29,10 +30,10 @@ $('device-form').onsubmit = async event => {
   event.preventDefault();
   const cameras = [$('main-camera').value, $('secondary-camera').value];
   if (cameras.some(Boolean) && (!cameras.every(Boolean) || cameras[0] === cameras[1])) { message('请选择两只不同的摄像头，或将两项都设为自动识别。', true); return; }
-  $('device-fields').disabled = true; loading = true; message('正在保存并应用…');
+  setDisabled(true); loading = true; message('正在保存并应用…');
   try {
     const data = await request('/api/devices/config', 'PUT', { cameras: cameras.every(Boolean) ? cameras : [], microphone: $('microphone-device').value, mirrorMain: $('mirror-main').checked, mirrorSecondary: $('mirror-secondary').checked });
     message(data.warning || '设备配置已保存到本机文件；已开启的设备正在应用新配置。关闭的设备保持关闭。', !!data.warning);
   } catch (error) { message(error.message, true); }
-  finally { loading = false; $('device-fields').disabled = false; }
+  finally { loading = false; setDisabled(false); }
 };

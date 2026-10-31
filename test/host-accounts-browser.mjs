@@ -27,6 +27,8 @@ async function login(username, password, success = true) {
 try {
   await mkdir('test-results', { recursive: true });
   await host.goto(`http://127.0.0.1:${local.address().port}/`);
+  assert.equal(await host.locator('#camera-view').isVisible(), true);
+  await host.locator('#view-settings').click();
   await host.getByText('尚未配置外部人员，请填写姓名、账号和密钥后保存。', { exact: true }).waitFor();
   assert.equal(await host.locator('#access-settings').isVisible(), true);
   await host.locator('#remote-name').fill('张三'); await host.locator('#remote-username').fill('alice'); await host.locator('#remote-key').fill('alice-key');
@@ -57,7 +59,7 @@ try {
   await host.locator('[data-username="alice.new"] [data-action="delete"]').click(); await host.locator('[data-username="alice.new"]').waitFor({ state: 'detached' }); await saved();
   await login('alice.new', 'new-alice-key', false);
   await login('bob', bobKey); assert.match(await remote.locator('#account-name').textContent(), /李四/);
-  await host.reload(); await host.locator('[data-username="bob"]').waitFor();
+  await host.reload(); await host.locator('#view-settings').click(); await host.locator('[data-username="bob"]').waitFor();
   assert.equal(await host.locator('#remote-key').inputValue(), ''); assert.deepEqual(errors, []);
   console.log('PASS: local personnel UI, multiple accounts, generated keys, name-only edit, renamed login, key rotation, pause/enable/disable/delete, reload and mobile layout.');
 } finally { await browser.close(); await local.shutdown(); await cloud.shutdown(); }

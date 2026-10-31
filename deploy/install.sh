@@ -47,6 +47,7 @@ chmod 600 /etc/remote-meeting.env
 bash deploy/install-turn.sh
 systemctl is-active --quiet remote-meeting-turn
 bash deploy/install-tls.sh
+bash deploy/install-public-redirects.sh
 mkdir -p /etc/nginx/snippets /opt/remote-meeting/backups
 stamp="$(date +%Y%m%d%H%M%S)"
 cp -a "$site_config" "/opt/remote-meeting/backups/nginx-$stamp.conf"

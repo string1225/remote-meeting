@@ -5,9 +5,9 @@ import { pageFullscreen, remotePlayers } from '/media.js';
 import { createAudioMonitor } from '/audio-meter.js';
 import { createPlaybackControls } from '/playback-controls.js';
 const $ = id => document.getElementById(id);
-let bridge, current, reconnectTimer, viewChosen = false;
+let bridge, current, reconnectTimer;
 function showView(camera) {
-  viewChosen = true; $('camera-view').hidden = !camera; $('access-settings').hidden = camera;
+  $('camera-view').hidden = !camera; $('access-settings').hidden = camera;
   $('view-cameras').setAttribute('aria-pressed', String(camera)); $('view-settings').setAttribute('aria-pressed', String(!camera));
 }
 function send(message) { if (bridge?.readyState === WebSocket.OPEN) bridge.send(JSON.stringify(message)); }
@@ -27,7 +27,7 @@ function renderParticipants() {
   }));
 }
 function render(status) {
-  const first = !current?.peers.length && status.peers.length; current = status;
+  current = status;
   $('connection').textContent = status.online ? '● 远端接入在线' : status.paused ? '远端接入已暂停' : '正在连接远端…';
   $('people-count').textContent = status.peers.length + ' / 2 位远端';
   $('capture-status').textContent = status.capturing ? '现场摄像头已开启' : status.state === 'starting' ? '正在切换摄像头…' : status.state === 'error' ? '摄像头启动失败' : '待机 · 原摄像头已释放';
@@ -45,7 +45,7 @@ function render(status) {
   $('local-empty').hidden = previewReady; $('local-preview').hidden = !previewReady;
   $('local-empty').textContent = status.capturing ? '正在读取现场合成预览…' : '远端可启动现场摄像头';
   if (!status.capturing) $('local-preview').removeAttribute('src');
-  if (first && !viewChosen) showView(true); renderParticipants();
+  renderParticipants();
 }
 function connect() {
   const ws = new WebSocket('ws://' + location.host + '/bridge'); bridge = ws;

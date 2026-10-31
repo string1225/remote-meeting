@@ -45,15 +45,27 @@ try {
   assert.equal(stack.camera.starts, 3);
   await stack.host.locator('#pause').click();
   for (const page of clients) await page.waitForFunction(() => document.querySelector('#host-status').textContent.includes('离线'));
-  assert.equal(stack.local.hostStatus().capturing, true);
+  await stack.host.waitForFunction(() => window.hostDiagnostics().virtualCamera.state === 'stopped');
   await stack.host.locator('#pause').click();
-  for (const page of clients) await page.waitForFunction(() => document.querySelector('#host-camera-toggle').textContent === '关闭摄像头' && !document.querySelector('#host-camera-toggle').disabled);
-  await clients[0].locator('#leave').click(); await clients[1].locator('#leave').click();
-  await stack.host.waitForFunction(() => window.hostDiagnostics().peers.length === 0);
-  assert.equal(stack.local.hostStatus().capturing, true); await stack.host.locator('#host-microphone-toggle').click(); await stack.host.waitForFunction(()=>!window.hostDiagnostics().microphone);
-  await stack.host.locator('#local-camera-toggle').click(); await stack.host.waitForFunction(() => window.hostDiagnostics().virtualCamera.state === 'stopped');
+  for (const page of clients) await page.waitForFunction(() => document.querySelector('#host-camera-toggle').textContent === '启动摄像头' && !document.querySelector('#host-camera-toggle').disabled);
+  assert.equal(stack.local.hostStatus().capturing, false);
+  await startCameras(clients[0]);
+  await clients[0].locator('#leave').click();
+  await stack.host.waitForFunction(() => window.hostDiagnostics().peers.length === 1);
+  assert.equal(stack.local.hostStatus().capturing, true);
+  await clients[1].locator('#leave').click();
+  await stack.host.waitForFunction(() => window.hostDiagnostics().peers.length === 0 && window.hostDiagnostics().virtualCamera.state === 'stopped');
+  assert.equal((await fetch(hostUrl + 'api/preview')).status, 204);
+  assert.equal(stack.local.hostStatus().microphone, true);
+  await clients[0].reload(); await clients[0].waitForFunction(() => window.controlDiagnostics().connected);
+  assert.equal(stack.local.hostStatus().capturing, false);
+  assert.equal(stack.camera.starts, 4);
+  await startCameras(clients[0]);
+  await clients[0].locator('#leave').click();
+  await stack.host.waitForFunction(() => window.hostDiagnostics().peers.length === 0 && window.hostDiagnostics().virtualCamera.state === 'stopped');
+  await stack.host.locator('#host-microphone-toggle').click(); await stack.host.waitForFunction(()=>!window.hostDiagnostics().microphone);
   assert.deepEqual(await stack.host.evaluate(()=>testMediaRequests), []);
 
   assert.deepEqual(stack.errors, []);
-  console.log('PASS: manual native camera/microphone startup and duplex TURN relay video/audio, shared camera controls, local stop, restart, reconnect, capacity and account departure.');
+  console.log('PASS: manual native camera/microphone startup and duplex TURN relay video/audio, shared camera controls, automatic camera release on last departure/disconnect, restart, reconnect and capacity.');
 } finally { await browser.close(); await stack.close(); }

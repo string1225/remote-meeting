@@ -31,17 +31,36 @@ export class LocalMedia {
   async stop() { await Promise.all(['audio', 'video'].map(kind => this.set(kind, false))); }
 }
 
-let fullscreen;
+let fullscreen, browserFullscreenRequest;
+function exitBrowserFullscreen() {
+  if (document.fullscreenElement === document.documentElement) void document.exitFullscreen().catch(() => {});
+}
 export function pageFullscreen(stage, button) {
-  const close = () => { stage.classList.remove('is-page-fullscreen'); document.body.classList.remove('has-page-fullscreen'); button.textContent = '网页内全屏'; button.setAttribute('aria-pressed', 'false'); if (fullscreen?.stage === stage) fullscreen = null; };
+  const close = (exitBrowser = true) => {
+    stage.classList.remove('is-page-fullscreen'); button.textContent = '网页内全屏'; button.setAttribute('aria-pressed', 'false');
+    if (fullscreen?.stage !== stage) return;
+    const browserOwned = fullscreen.browserOwned; fullscreen = null; document.body.classList.remove('has-page-fullscreen');
+    if (exitBrowser && browserOwned) exitBrowserFullscreen();
+  };
   button.type = 'button'; button.textContent = '网页内全屏'; button.setAttribute('aria-pressed', 'false');
   button.onclick = () => {
     if (fullscreen?.stage === stage) { close(); return; }
-    fullscreen?.close(); fullscreen = { stage, close }; stage.classList.add('is-page-fullscreen'); document.body.classList.add('has-page-fullscreen'); button.textContent = '退出网页全屏'; button.setAttribute('aria-pressed', 'true');
+    const browserOwned = fullscreen?.browserOwned || !!browserFullscreenRequest;
+    fullscreen?.close(false); fullscreen = { stage, close, browserOwned }; stage.classList.add('is-page-fullscreen'); document.body.classList.add('has-page-fullscreen'); button.textContent = '退出网页全屏'; button.setAttribute('aria-pressed', 'true');
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen && !browserFullscreenRequest) {
+      fullscreen.browserOwned = true;
+      try {
+        browserFullscreenRequest = document.documentElement.requestFullscreen()
+          .then(() => { if (!fullscreen) exitBrowserFullscreen(); })
+          .catch(() => { if (fullscreen) fullscreen.browserOwned = false; })
+          .finally(() => { browserFullscreenRequest = null; });
+      } catch { fullscreen.browserOwned = false; }
+    }
   };
   return close;
 }
 document.addEventListener('keydown', event => { if (event.key === 'Escape') fullscreen?.close(); });
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) fullscreen?.close(false); });
 
 export function preview(video, track) {
   if (video.srcObject?.getVideoTracks()[0] === track) return;

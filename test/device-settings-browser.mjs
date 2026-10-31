@@ -11,6 +11,12 @@ const openSettings = async () => { await stack.host.locator('#view-cameras').cli
 const save = async () => { await stack.host.locator('#save-devices').click(); await stack.host.waitForFunction(() => !document.querySelector('#device-fields').disabled && document.querySelector('#device-message').textContent.includes('已保存')); };
 try {
   await openSettings(); assert.equal(stack.local.hostStatus().capturing, false); assert.equal(stack.local.hostStatus().microphone, false);
+  const layout = await stack.host.evaluate(() => {
+    const box = selector => document.querySelector(selector).getBoundingClientRect();
+    const mirror = box('#mirror-secondary').right, save = box('#save-devices'), refresh = box('#refresh-devices'), message = box('#device-message');
+    return { equal: save.width === refresh.width && save.height === refresh.height, inline: Math.abs(save.y - refresh.y) < 1 && save.left > mirror && refresh.left > save.right && message.left > refresh.right };
+  });
+  assert.deepEqual(layout, { equal: true, inline: true });
   assert.equal(await stack.host.locator('#mirror-main').isChecked(), false); assert.equal(await stack.host.locator('#mirror-secondary').isChecked(), true);
   await stack.host.locator('#main-camera').selectOption('Synthetic camera 1'); await stack.host.locator('#secondary-camera').selectOption('Synthetic camera 0');
   await stack.host.locator('#microphone-device').selectOption('synthetic-440'); await save();
