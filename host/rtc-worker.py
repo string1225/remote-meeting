@@ -22,6 +22,7 @@ spec = importlib.util.spec_from_file_location('capture', pathlib.Path(__file__).
 capture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(capture)
 output_lock = threading.Lock()
+VIDEO_BITRATE = 1500000
 
 def emit(**data):
     with output_lock:
@@ -62,12 +63,20 @@ class Broadcast:
         self.loop.call_soon_threadsafe(deliver)
 
 
+def output_dimensions(width, height, settings):
+    # Bound the actual primary source, including after a device/PIP swap. Keep
+    # its aspect ratio and never enlarge a low-resolution source for encoding.
+    scale = min(1, 1280 / width, 720 / height,
+                settings['width'] / width, settings['height'] / height)
+    return max(2, int(width * scale) // 2 * 2), max(2, int(height * scale) // 2 * 2)
+
+
 def video_encoder(width, height, fps, preferred='auto'):
     errors = []
     for name in (['h264_qsv', 'libx264'] if preferred == 'auto' else [preferred]):
         try:
             codec = av.CodecContext.create(name, 'w')
-            codec.width, codec.height, codec.bit_rate = width, height, 3000000
+            codec.width, codec.height, codec.bit_rate = width, height, VIDEO_BITRATE
             codec.time_base, codec.framerate = Fraction(1, 90000), Fraction(fps)
             codec.pix_fmt = 'nv12' if name == 'h264_qsv' else 'yuv420p'
             codec.thread_count, codec.gop_size, codec.max_b_frames = 2, fps, 0
@@ -110,7 +119,7 @@ class Devices:
         def encode():
             try:
                 codec, name = video_encoder(width, height, fps, self.config.get('encoder', 'auto'))
-                encoder_info.append(name); encoder_ready.set()
+                encoder_info.append((name, codec.bit_rate)); encoder_ready.set()
                 while not self.camera_stop.is_set():
                     try: image, pts = pending.get(timeout=0.1)
                     except queue.Empty: continue
@@ -136,12 +145,15 @@ class Devices:
                 for i, index in enumerate(capture.select_cameras(names, self.config.get('cameras', []))):
                     if self.camera_stop.is_set(): return
                     sources.append(capture.Source(index, names[index], 1920 if i == 0 else 640, 1080 if i == 0 else 480, fps))
+            source_height, source_width = sources[0].latest().shape[:2]
+            width, height = output_dimensions(source_width, source_height, settings)
             encoder_thread = threading.Thread(target=encode, daemon=True)
             encoder_thread.start(); encoder_ready.wait()
             if encoder_errors: raise encoder_errors[0]
-            encoder = encoder_info[0]
+            encoder, bitrate = encoder_info[0]
             if self.camera_stop.is_set(): return
-            emit(type='camera-state', state='ready', cameras=[s.info for s in sources], encoder=encoder)
+            emit(type='camera-state', state='ready', cameras=[s.info for s in sources], encoder=encoder,
+                 output=dict(width=width, height=height, fps=fps, targetBitrate=bitrate))
             clock, last, count, preview_at, applied, last_encoded, render_ms = time.monotonic(), time.monotonic(), 0, 0, -1, 0, 0
             while not self.camera_stop.is_set():
                 if encoder_errors: raise encoder_errors[0]

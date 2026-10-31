@@ -1,6 +1,6 @@
 # 同屏 · 服务器转发网页会议
 
-Windows 后端直接采集 USB 主摄像头、笔记本前置摄像头和话筒，合成 **1920×1080 / 30 fps**，通过 WebRTC 发送给远端。两路可独立设置左右镜像，画中画固定右下角，支持共享缩放与位置控制。现场网页接收远端的画面和声音。
+Windows 后端直接采集 USB 主摄像头、笔记本前置摄像头和话筒，合成最高 **1280×720 / 30 fps**，通过 WebRTC 发送给远端。其他画幅按主摄像头实际比例缩小，低分辨率源不放大。两路可独立设置左右镜像，画中画固定右下角，支持共享缩放与位置控制。现场网页接收远端的画面和声音。
 
 ## 使用
 
@@ -35,7 +35,7 @@ USB + 笔记本 → Python 原生采集 / 合成 → 一份 H264 编码 → 139 
 - 现场网页的 Permissions-Policy 禁止摄像头和麦克风，代码不调用 getUserMedia 或 enumerateDevices。现场预览通过后端本地 JPEG 接口低频刷新，预览图像不会发送给云端。
 - 原生后端使用 OpenCV / DirectShow 采集两只摄像头，目标分别为 ≤1920×1080/30 和 ≤640×480/30，每只只保留最新帧。
 - 首选 Intel Quick Sync H264 硬件编码，失败时回退 libx264。两位远端共用一份 H264 编码和一份 Opus 编码；每位远端有自己的 WebRTC 加密连接。没有虚拟摄像头读取及现场浏览器重复编码。
-- 默认视频码率约 3 Mbps，现场音频单声道 48 kHz / Opus 48 kbps。远端自身视频上限 640×480 / 15 fps，约 600 kbps。实际帧率受硬件及网络影响，状态包含 measuredFps、encoder 和 encodeMs。
+- 合成视频编码目标为 1.5 Mbps，现场音频单声道 48 kHz / Opus 48 kbps。远端自身视频上限 640×480 / 15 fps，约 600 kbps。实际码率随画面与编码器变化，实际帧率受硬件及网络影响；状态包含 measuredFps、encoder、encodeMs 和 virtualCamera.output（实际编码尺寸、帧率与 targetBitrate）。
 - 话筒优先使用 Windows 默认 WASAPI 输入，也可在本机设备设置中选择。按设备原生采样率和声道回调采集，再明确重采样、混音为 48 kHz 单声道 Opus；每包 960 采样 / 20 ms，RTP 时钟固定 48 kHz。采集队列有上限，过载时丢弃陈旧数据并保留真实采集时间戳，不积压或放慢声音。现场页面显示采集格式、编码频率和包频率。后端不包含浏览器的回声消除；同处一室或扬声器回传时可使用耳机。
 - 浏览器强制 iceTransportPolicy=relay，原生后端在 ICE 收集前设置 aioice 的 RELAY 策略；信令还会过滤 host / srflx / prflx 候选。TURN 不可用时连接失败，不回退 P2P。getStats 的 localCandidate 和 remoteCandidate 应均为 relay。
 - 云端用 TURN_SECRET 签发 9 小时有效的 coturn REST 凭据，覆盖最长 8 小时登录会话；共享密钥只保存在服务器。每次远端入会前刷新主机配置，已运行的 Python 后端也会接收更新，避免闲置后使用过期凭据。
@@ -56,7 +56,7 @@ node host/index.js
 powershell -NoProfile -ExecutionPolicy Bypass -File host/install.ps1
 ```
 
-在 .local/host.json 设置 serverUrl、agentKey、nodePath、browserPath。serverUrl 使用云端 /meeting/ 地址，agentKey 与 HOST_AGENT_KEY 相同。cameras 顺序为 USB、笔记本前置；空数组自动识别。output 默认 {"width":1920,"fps":30}。rtc.pythonPath 可指定 Python；rtc.encoder 可设 auto、h264_qsv 或 libx264，默认 auto。headless:false 显示现场窗口。
+在 .local/host.json 设置 serverUrl、agentKey、nodePath、browserPath。serverUrl 使用云端 /meeting/ 地址，agentKey 与 HOST_AGENT_KEY 相同。cameras 顺序为 USB、笔记本前置；空数组自动识别。output 默认 {"width":1280,"fps":30}，可指定更小的 width、height；旧的 1920×1080 配置也会限制到 1280×720 范围。原生后端每次启动或切换摄像头均按实际主源等比计算输出，不放大低分辨率源。rtc.pythonPath 可指定 Python；rtc.encoder 可设 auto、h264_qsv 或 libx264，默认 auto。headless:false 显示现场窗口。
 
 更新后可在已登录 Windows 桌面中双击 `host/restart.cmd`，自动核对并关闭旧主机进程树，重新启动常驻程序和现场窗口；服务账号无权关闭其他用户的进程时，不要反复重试同一命令。
 
@@ -106,6 +106,7 @@ npm run test:host-accounts
 .local/virtual-camera/Scripts/python.exe test/native-camera.test.py
 .local/virtual-camera/Scripts/python.exe test/audio-capture.test.py
 .local/virtual-camera/Scripts/python.exe test/native-relay.test.py
+.local/virtual-camera/Scripts/python.exe test/rtc-video.test.py
 node test/relay-browser.mjs
 node test/device-settings-browser.mjs
 # 以下验收打开真实设备，需先关闭另一份本地采集

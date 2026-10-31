@@ -31,7 +31,7 @@ test('native device APIs work without a renderer and require same-origin console
   assert.equal((await request('camera', { enabled: 'yes' })).status, 400);
   assert.deepEqual(calls, []);
   for (const kind of ['microphone', 'camera']) for (const enabled of [true, false]) assert.equal((await request(kind, { enabled })).status, 202);
-  assert.deepEqual(calls, [['microphone', true], ['microphone', false], ['camera', true, 1920], ['camera', false]]);
+  assert.deepEqual(calls, [['microphone', true], ['microphone', false], ['camera', true, 1280], ['camera', false]]);
 });
 
 async function waitFor(predicate) {
