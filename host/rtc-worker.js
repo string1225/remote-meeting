@@ -34,6 +34,7 @@ export function createRtcWorker(config, publish) {
     configure(servers) { iceServers = servers || []; if (child) send({ type: 'ice-config', iceServers }); },
     async listDevices() { return (await request('devices-list')).devices; },
     async applyDevices(next) { Object.assign(config, next); if (child) await request('devices-config', { config: next }); },
+    async applyVideo(output) { settings = output; if (child) await request('video-config', { output }); },
     start(output) { settings = output; send({ type: 'camera-start' }); },
     stop() { if (child) send({ type: 'camera-stop' }); },
     microphone(enabled) { send({ type: enabled ? 'microphone-start' : 'microphone-stop' }); },

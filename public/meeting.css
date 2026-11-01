@@ -2,3 +2,4 @@
 .video-stage video[hidden]{display:none}.live-sidebar .audio-monitor .audio-test-actions button{font-size:11px;padding:7px 8px}
 
 .video-stage img{display:block;width:100%;height:100%;object-fit:contain}.video-stage img[hidden]{display:none}
+.video-quality{display:flex;align-items:center;gap:8px;min-width:0;margin:0;font-size:12px}.video-quality select{width:auto;max-width:100%;margin:0;padding:8px;font-size:12px}

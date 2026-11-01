@@ -23,3 +23,7 @@ test('main covers the canvas without stretching; PIP stays inside the lower righ
     assert.ok(p.x > w / 2 && p.y > h / 2 && p.x + p.width < w && p.y + p.height < h);
   }
 });
+
+test('explicit profiles offer the three frame-rate and resolution tradeoffs', () => {
+  for (const [profile, width, height, fps] of [['480p30', 854, 480, 30], ['720p20', 1280, 720, 20], ['1080p10', 1920, 1080, 10]]) assert.deepEqual(compositeSettings({ profile }), { width, height, fps, profile });
+});

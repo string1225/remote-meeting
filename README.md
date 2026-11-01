@@ -1,12 +1,12 @@
 # 同屏 · 服务器转发网页会议
 
-Windows 后端直接采集 USB 主摄像头、笔记本前置摄像头和话筒，合成最高 **1280×720 / 30 fps**，通过 WebRTC 发送给远端。其他画幅按主摄像头实际比例缩小，低分辨率源不放大。两路可独立设置左右镜像，画中画固定右下角，支持共享缩放与位置控制。现场网页接收远端的画面和声音。
+Windows 后端直接采集 USB 主摄像头、笔记本前置摄像头和话筒，通过 WebRTC 发送给远端。网页可选择 **480p/30帧、720p/20帧、1080p/10帧**，默认 720p/20帧；其他画幅按主摄像头实际比例缩小，低分辨率源不放大。两路可独立设置左右镜像，画中画固定右下角，支持共享缩放与位置控制。现场网页接收远端的画面和声音。
 
 ## 使用
 
 1. 保持本机开机、联网并登录 Windows，启动本地常驻服务。
 2. 远端登录 [会议网页](https://home.sunny-string.cn/meeting/)。登录、刷新和重连都不启动任何设备。
-3. 分别点击“启动摄像头”和“开启现场话筒”。两个开关独立，本地控制台也可操作，状态实时同步。
+3. 可先选择“现场画质”，再分别点击“启动摄像头”和“开启现场话筒”。两个开关独立，本地控制台也可操作，画质和状态实时同步。画质选择保存在本机 `.local/video.json`，切档只重启视频采集，不中断话筒和音频连接。
 4. 远端需要露脸或说话时，分别开启“我的摄像头”和“麦克风”，允许浏览器权限。只接收现场时不需要给远端网页设备权限。
 5. 可拖动现场画面、使用方向键或调整定位框控制 1–8× 数字缩放。笔记本画中画保持右下角。
 6. 本机网页默认显示摄像头视图，左侧 2/3 为现场画面，右侧 1/3 为远端画面；窄屏上下排列。本地、远端点击“网页内全屏”后，画面铺满网页并同时请求浏览器全屏，再次点击或按 Esc 退出。声音被浏览器拦截时点击“播放远端声音”。
@@ -22,6 +22,8 @@ Windows 后端直接采集 USB 主摄像头、笔记本前置摄像头和话筒�
 
 GET /api/devices 返回本地后端枚举和选择，PUT /api/devices/config 保存设置，二者要求同源请求和 X-Host-Console:1。设备未连接或设置无效时拒绝保存。
 
+PUT /api/video 接受 {"profile":"480p30"}、{"profile":"720p20"} 或 {"profile":"1080p10"}，要求同源 JSON 请求和 X-Host-Console:1；远端通过认证后的 video-profile 控制调用同一逻辑。读取或更改关闭状态的画质不会自动开启设备。
+
 ## 数据与性能
 
 ```text
@@ -35,7 +37,9 @@ USB + 笔记本 → Python 原生采集 / 合成 → 一份 H264 编码 → 139 
 - 现场网页的 Permissions-Policy 禁止摄像头和麦克风，代码不调用 getUserMedia 或 enumerateDevices。现场预览通过后端本地 JPEG 接口低频刷新，预览图像不会发送给云端。
 - 原生后端使用 OpenCV / DirectShow 采集两只摄像头，目标分别为 ≤1920×1080/30 和 ≤640×480/30，每只只保留最新帧。
 - 首选 Intel Quick Sync H264 硬件编码，失败时回退 libx264。两位远端共用一份 H264 编码和一份 Opus 编码；每位远端有自己的 WebRTC 加密连接。没有虚拟摄像头读取及现场浏览器重复编码。
-- 合成视频编码目标为 1.5 Mbps，现场音频单声道 48 kHz / Opus 48 kbps。远端自身视频上限 640×480 / 15 fps，约 600 kbps。实际码率随画面与编码器变化，实际帧率受硬件及网络影响；状态包含 measuredFps、encoder、encodeMs 和 virtualCamera.output（实际编码尺寸、帧率与 targetBitrate）。
+- 按 139 的 3 Mbps 公网出口分配视频预算：一位远端时现场视频最高 900 kbps，两位远端时每路最高 600 kbps；远端回传视频每路最高 250 kbps / 15 fps，给双向 Opus 48 kbps 音频、封装和其他流量预留余量。拥塞反馈进一步降低视频码率和实际帧率，所选画质的帧率是上限。
+- 音频和 RTCP 优先发送，不排在视频帧的所有分片后。视频限制编码突发和 TCP 缓冲，丢弃过期帧或溢出的预测帧后请求新的关键帧；不会把任意丢帧后的旧预测链继续发送。接收端请求低延迟缓冲。
+- 本机 `/api/status` 包含实际编码码率、帧率、编码时间，以及每位远端上报的接收码率、解码时间、丢包率、RTT 和缓冲时间。`arrivalLagMs` 表示接收进度相对本次采样起点落后的增长量，不是绝对端到端延迟。
 - 话筒优先使用 Windows 默认 WASAPI 输入，也可在本机设备设置中选择。按设备原生采样率和声道回调采集，再明确重采样、混音为 48 kHz 单声道 Opus；每包 960 采样 / 20 ms，RTP 时钟固定 48 kHz。采集队列有上限，过载时丢弃陈旧数据并保留真实采集时间戳，不积压或放慢声音。现场页面显示采集格式、编码频率和包频率。后端不包含浏览器的回声消除；同处一室或扬声器回传时可使用耳机。
 - 浏览器强制 iceTransportPolicy=relay，原生后端在 ICE 收集前设置 aioice 的 RELAY 策略；信令还会过滤 host / srflx / prflx 候选。TURN 不可用时连接失败，不回退 P2P。getStats 的 localCandidate 和 remoteCandidate 应均为 relay。
 - 云端用 TURN_SECRET 签发 9 小时有效的 coturn REST 凭据，覆盖最长 8 小时登录会话；共享密钥只保存在服务器。每次远端入会前刷新主机配置，已运行的 Python 后端也会接收更新，避免闲置后使用过期凭据。
@@ -56,7 +60,7 @@ node host/index.js
 powershell -NoProfile -ExecutionPolicy Bypass -File host/install.ps1
 ```
 
-在 .local/host.json 设置 serverUrl、agentKey、nodePath、browserPath。serverUrl 使用云端 /meeting/ 地址，agentKey 与 HOST_AGENT_KEY 相同。cameras 顺序为 USB、笔记本前置；空数组自动识别。output 默认 {"width":1280,"fps":30}，可指定更小的 width、height；旧的 1920×1080 配置也会限制到 1280×720 范围。原生后端每次启动或切换摄像头均按实际主源等比计算输出，不放大低分辨率源。rtc.pythonPath 可指定 Python；rtc.encoder 可设 auto、h264_qsv 或 libx264，默认 auto。headless:false 显示现场窗口。
+在 .local/host.json 设置 serverUrl、agentKey、nodePath、browserPath。serverUrl 使用云端 /meeting/ 地址，agentKey 与 HOST_AGENT_KEY 相同。cameras 顺序为 USB、笔记本前置；空数组自动识别。output.profile 设置初始档位，默认 720p20；网页保存的 .local/video.json 优先于初始配置，1080p 仅在明确选择 1080p10 时启用。原生后端按实际主源等比计算输出，不放大低分辨率源。rtc.pythonPath 可指定 Python；rtc.encoder 可设 auto、h264_qsv 或 libx264，默认 auto。headless:false 显示现场窗口。
 
 更新后可在已登录 Windows 桌面中双击 `host/restart.cmd`，自动核对并关闭旧主机进程树，重新启动常驻程序和现场窗口；服务账号无权关闭其他用户的进程时，不要反复重试同一命令。
 
@@ -101,6 +105,7 @@ npm run check
 npm test
 npm run test:e2e
 npm run test:meeting-ui
+node test/video-quality-browser.mjs
 npm run test:accounts
 npm run test:host-accounts
 .local/virtual-camera/Scripts/python.exe test/native-camera.test.py

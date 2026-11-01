@@ -139,3 +139,14 @@ test('relay signaling is restricted to the host; camera and microphone commands 
  await new Promise(r=>setTimeout(r,40));assert.equal(other.inbox.some(m=>m.type==='signal'),false);
  remote.send({type:'signal',to:hj.self.id,channel:'host-media',data:{description:{type:'offer',sdp:'v=0'}}});assert.equal((await remote.next('error')).code,'INVALID');
 });
+
+test('quality controls are validated and receiver diagnostics contain only bounded numbers', async t => {
+  const f = await fixture(t), host = await f.client({ agent: true }); await host.next('joined');
+  const cookie = cookieOf(await f.login()), { ticket } = await (await f.reserve(cookie)).json();
+  const remote = await f.client({ cookie, ticket }), joined = await remote.next('joined');
+  remote.send({ type: 'control', data: { type: 'video-profile', profile: '1080p30' } });
+  remote.send({ type: 'control', data: { type: 'video-profile', profile: '1080p10', ignored: 'drop' } });
+  assert.deepEqual((await host.next('control')).data, { type: 'video-profile', profile: '1080p10' });
+  remote.send({ type: 'media-stats', data: { incomingKbps: 600, rttMs: 40, jitterBufferMs: 30, lossPercent: -1, decodeMs: 'fake', secret: 'drop' } });
+  assert.deepEqual(await host.next('media-stats'), { type: 'media-stats', from: joined.self.id, data: { incomingKbps: 600, jitterBufferMs: 30, rttMs: 40 } });
+});

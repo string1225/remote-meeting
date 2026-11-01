@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import { authenticateAgent } from './agent-auth.js';
 import { normalizeView } from '../host/crop.js';
-import { compositeSettings } from '../host/composite.js';
+import { compositeSettings, videoProfiles } from '../host/composite.js';
 import { isRelayCandidate, relaySdp } from './relay.js';
 
 const error = (status, message) => Object.assign(new Error(message), { status });
@@ -86,6 +86,7 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
           if (!['idle', 'starting', 'capturing', 'error'].includes(msg.state)) return;
           hostState = { state: msg.state, message: String(msg.message || '').slice(0, 240), cameras: (Array.isArray(msg.cameras) ? msg.cameras : []).slice(0, 2).map((c, index) => ({ camera: index, label: String(c.label || '').slice(0, 100), width: Math.max(0, Math.min(32768, Number(c.width) || 0)), height: Math.max(0, Math.min(32768, Number(c.height) || 0)), frameRate: Math.max(0, Math.min(120, Number(c.frameRate) || 0)) })) };
           hostState.output = compositeSettings(msg.output);
+          hostState.videoChanging = msg.videoChanging === true;
           if (msg.view) { try { hostState.view = { ...normalizeView(msg.view), camera: 0, shared: true, outputWidth: hostState.output.width, outputHeight: hostState.output.height }; } catch {} }
           if (['ready', 'starting', 'stopping', 'stopped', 'disabled', 'error'].includes(msg.virtualCamera?.state)) hostState.virtualCamera = { state: msg.virtualCamera.state, device: String(msg.virtualCamera.device || '').slice(0, 100), message: String(msg.virtualCamera.message || '').slice(0, 240), measuredFps: Math.max(0, Math.min(60, Number(msg.virtualCamera.measuredFps) || 0)) };
           hostState.microphoneStatus = { state: ['ready', 'starting', 'stopped', 'error'].includes(msg.microphoneStatus?.state) ? msg.microphoneStatus.state : msg.media?.audio ? 'ready' : 'stopped' };
@@ -93,6 +94,13 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
           broadcast({ type: 'host-state', ...hostState }, peer); return;
         }
         if (agent && msg.type === 'media-reset') { for (const remote of connected()) send(remote.ws, { type: 'media-reset', from: peer.id }); return; }
+        if (!agent && msg.type === 'media-stats' && host && msg.data && typeof msg.data === 'object') {
+          const data = {};
+          for (const key of ['incomingKbps', 'videoFps', 'jitterBufferMs', 'arrivalLagMs', 'decodeMs', 'lossPercent', 'rttMs']) {
+            if (Number.isFinite(msg.data[key]) && msg.data[key] >= 0 && msg.data[key] <= 1e9) data[key] = msg.data[key];
+          }
+          send(host.ws, { type: 'media-stats', from: peer.id, data }); return;
+        }
         if (msg.type === 'signal') {
           const target = [host, ...connected()].find(p => p?.id === msg.to);
           if (!target || target.role === peer.role || !['host-media', 'remote-media'].includes(msg.channel)) return;
@@ -114,7 +122,8 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
         }
         if (msg.type !== 'control' || agent || !host) return;
         const data = msg.data;
-        if (data?.type === 'camera-start' || data?.type === 'camera-stop' || data?.type === 'microphone-start' || data?.type === 'microphone-stop') send(host.ws, { type: 'control', from: peer.id, data: { type: data.type } });
+        if (data?.type === 'video-profile' && Object.hasOwn(videoProfiles, data.profile)) send(host.ws, { type: 'control', from: peer.id, data: { type: 'video-profile', profile: data.profile } });
+        else if (data?.type === 'camera-start' || data?.type === 'camera-stop' || data?.type === 'microphone-start' || data?.type === 'microphone-stop') send(host.ws, { type: 'control', from: peer.id, data: { type: data.type } });
         else if (data?.type === 'viewport' && data.camera === 0) {
           let view; try { view = normalizeView(data); } catch { return fail('INVALID', '无效的缩放或位置'); }
           send(host.ws, { type: 'control', from: peer.id, data: { type: 'viewport', camera: 0, ...view } });

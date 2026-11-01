@@ -52,9 +52,10 @@ function renderButton() {
 }
 function hostStatus(status) {
   state = status.state;
+  $('video-profile').value = status.output?.profile || '720p20'; $('video-profile').disabled = !connected || status.videoChanging === true || state === 'offline';
   const labels = { offline: '现场主机离线 · 等待上线', idle: '现场摄像头已关闭', starting: '正在准备现场摄像头…', capturing: '现场摄像头已开启', error: '摄像头异常：' + (status.message || '请检查本地设备') };
   $('host-status').textContent = labels[state] || '正在读取主机状态…';
-  $('capture-info').textContent = (status.output?.width || 1920) + ' × ' + (status.output?.height || 1080) + ' / ' + (status.output?.fps || 30) + ' fps · USB 主画面 + 右下角笔记本画中画';
+  $('capture-info').textContent = (status.output?.width || 1280) + ' × ' + (status.output?.height || 720) + ' / ' + (status.output?.fps || 20) + ' fps · USB 主画面 + 右下角笔记本画中画';
   hostMedia = status.media || {};
   $('host-microphone-toggle').textContent = status.microphoneStatus?.state === 'starting' ? '现场话筒正在启动…' : hostMedia.audio ? '关闭现场话筒' : '开启现场话筒';
   $('host-microphone-toggle').disabled = !connected || status.microphoneStatus?.state === 'starting';
@@ -147,6 +148,7 @@ $('host-camera-toggle').onclick = () => {
   requestTimer = setTimeout(() => { renderButton(); notify('暂未收到摄像头状态，请检查本地主机。', true); }, 20000);
 };
 $('host-microphone-toggle').onclick = () => { send({ type: hostMedia.audio ? 'microphone-stop' : 'microphone-start' }); };
+$('video-profile').onchange = () => { if (send({ type: 'video-profile', profile: $('video-profile').value })) $('video-profile').disabled = true; };
 const poll = setInterval(async () => {
   if (!accounts.current()) return;
   try { if (!connected) { hostStatus(await api('host-status')); if (wantConnect) void activate(); } }

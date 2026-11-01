@@ -5,6 +5,7 @@ import { createRtcWorker } from './rtc-worker.js';
 import { compositeSettings } from './composite.js';
 import { normalizeView } from './crop.js';
 import { createDeviceSettings, validateDeviceSettings } from './device-settings.js';
+import { createVideoSettings, validateVideoProfile } from './video-settings.js';
 
 const assets = new Map([['/', ['host/index.html', 'text/html']], ['/host-app.js', ['host/app.js', 'text/javascript']], ['/style.css', ['public/style.css', 'text/css']], ['/host.css', ['host/style.css', 'text/css']], ['/host-accounts.js', ['host/accounts.js', 'text/javascript']]]);
 assets.set('/device-controls.js', ['host/device-controls.js', 'text/javascript']);
@@ -17,7 +18,10 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
   let renderer, cloud, reconnectTimer, attempt = 0, paused = false, stopping = false, remotes = [], cameras = [], view = { zoom: 1, x: 0.5, y: 0.5 }, virtualStatus = { state: 'stopped' };
   let cloudWelcome, mediaStatus = { video: false, audio: false, error: '' };
   let microphoneStatus = { state: 'stopped' };
-  const output = compositeSettings(config.output);
+  const videoSettings = createVideoSettings(config.videoSettingsFile, config.output?.profile);
+  const output = compositeSettings(config.output && !config.videoSettingsFile && !config.output.profile ? config.output : { profile: videoSettings.profile });
+  let videoChanging = false;
+  const nativeStates = new Map(), receiverMetrics = new Map();
   const deviceSettings = createDeviceSettings({ file: config.deviceSettingsFile, fallback: config });
   let deviceSaving = false;
   const send = (ws, data) => { if (ws?.readyState === WebSocket.OPEN) { if (ws.bufferedAmount > 256 * 1024) ws.close(1008, 'Slow consumer'); else ws.send(JSON.stringify(data)); } };
@@ -25,8 +29,8 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
     renderer: renderer?.readyState === WebSocket.OPEN, online: cloud?.readyState === WebSocket.OPEN, paused,
     state: virtualStatus.state === 'ready' ? 'capturing' : ['starting', 'stopping'].includes(virtualStatus.state) ? 'starting' : virtualStatus.state === 'error' ? 'error' : 'idle',
     message: virtualStatus.message || '', capturing: virtualStatus.state === 'ready', microphone: mediaStatus.audio, media: mediaStatus, microphoneStatus,
-    cameras, output, view: { ...view, camera: 0, shared: true, sourceWidth: cameras[0]?.width || 0, sourceHeight: cameras[0]?.height || 0, outputWidth: output.width, outputHeight: output.height },
-    peers: remotes.map(p => ({ id: p.id, name: p.name, state: 'connected' })), virtualCamera: virtualStatus
+    cameras, output, videoChanging, view: { ...view, camera: 0, shared: true, sourceWidth: cameras[0]?.width || 0, sourceHeight: cameras[0]?.height || 0, outputWidth: output.width, outputHeight: output.height },
+    peers: remotes.map(p => ({ id: p.id, name: p.name, state: nativeStates.get(p.id) || 'connecting', receiver: receiverMetrics.get(p.id) })), virtualCamera: virtualStatus
   });
   const virtual = cameraFactory({ ...config.virtualCamera, ...config.rtc, output, ...deviceSettings.value, synthetic: config.mediaTest === true || config.rtc?.synthetic === true || config.virtualCamera?.synthetic === true }, message => {
     if (message.type === 'virtual-camera-state') {
@@ -36,8 +40,9 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
     else if (message.type === 'audio-metrics') { microphoneStatus = { ...microphoneStatus, ...message, type: 'microphone-state' }; }
     else if (message.type === 'signal') { send(cloud, message); return; }
     else if (message.type === 'worker-error') { mediaStatus.error = message.message; }
+    else if (message.type === 'peer-state' && remotes.some(p => p.id === message.id)) nativeStates.set(message.id, message.state);
     else if (message.type === 'viewport-applied') view = normalizeView(message);
-    else if (message.type === 'metrics') virtualStatus = { ...virtualStatus, measuredFps: message.fps, encoder: message.encoder, encodeMs: message.encodeMs, renderMs: message.renderMs };
+    else if (message.type === 'metrics') virtualStatus = { ...virtualStatus, measuredFps: message.fps, encoder: message.encoder, encodeMs: message.encodeMs, renderMs: message.renderMs, targetBitrate: message.targetBitrate, encodedKbps: message.encodedKbps, largestFrameBytes: message.largestFrameBytes };
     publish();
   });
   function json(res, status, data) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); }
@@ -49,6 +54,14 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
     // Local service is loopback-only and rejects DNS rebinding Host headers.
     if (req.headers.host !== `127.0.0.1:${server.address().port}`) { res.writeHead(403); res.end(); return; }
     try {
+      if (req.url === '/api/video') {
+        if (req.headers.origin !== `http://127.0.0.1:${server.address().port}` || req.headers['x-host-console'] !== '1' || req.method !== 'PUT' || req.headers['content-type'] !== 'application/json') return json(res, 403, { error: '请在本机控制台操作' });
+        let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 256) return json(res, 413, { error: '请求过长' }); }
+        let profile; try { profile = validateVideoProfile(JSON.parse(raw).profile); } catch (error) { return json(res, 400, { error: error.message }); }
+        if (videoChanging) return json(res, 409, { error: '画质正在切换，请稍后重试' });
+        try { await changeVideo(profile); return json(res, 200, { output }); }
+        catch (error) { return json(res, 500, { error: error.message }); }
+      }
       if (req.url === '/api/devices' || req.url === '/api/devices/config') {
         const origin = `http://127.0.0.1:${server.address().port}`;
         if (req.headers['x-host-console'] !== '1' || req.headers['sec-fetch-site'] === 'cross-site' || req.headers.origin && req.headers.origin !== origin || req.method !== 'GET' && req.headers.origin !== origin) return json(res, 403, { error: '请在本机控制台操作' });
@@ -116,12 +129,24 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
   function publish() {
     const current = status();
     send(renderer, { type: 'host-status', ...current });
-    send(cloud, { type: 'host-state', state: current.state, message: current.message, cameras: current.cameras, output: current.output, view: current.view, virtualCamera: current.virtualCamera, media: mediaStatus, microphoneStatus });
+    send(cloud, { type: 'host-state', state: current.state, message: current.message, cameras: current.cameras, output: current.output, videoChanging, view: current.view, virtualCamera: current.virtualCamera, media: mediaStatus, microphoneStatus });
+  }
+  async function changeVideo(profile) {
+    validateVideoProfile(profile);
+    if (videoChanging || output.profile === profile) return;
+    videoChanging = true; publish();
+    try {
+      await videoSettings.save(profile);
+      Object.assign(output, compositeSettings({ profile }));
+      await virtual.applyVideo?.({ ...output });
+    } finally { videoChanging = false; publish(); }
   }
   function mediaConfig() { if (cloudWelcome) send(renderer, { type: 'media-config', ...cloudWelcome, peers: remotes }); }
   function command(data) {
     if (!data || typeof data !== 'object') return;
-    if (data.type === 'camera-start') {
+    if (data.type === 'video-profile') {
+      void changeVideo(data.profile).catch(error => { mediaStatus.error = error.message; publish(); });
+    } else if (data.type === 'camera-start') {
       if (['ready', 'starting', 'stopping'].includes(virtualStatus.state)) return;
       view = { zoom: 1, x: 0.5, y: 0.5 };
       void virtual.start(output);
@@ -133,7 +158,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
   }
   function updateRemotes(next) {
     const previous = remotes; remotes = next.filter(p => p.role === 'remote');
-    for (const peer of previous) if (!remotes.some(p => p.id === peer.id)) virtual.peerRemove?.(peer.id);
+    for (const peer of previous) if (!remotes.some(p => p.id === peer.id)) { virtual.peerRemove?.(peer.id); nativeStates.delete(peer.id); receiverMetrics.delete(peer.id); }
     for (const peer of remotes) virtual.peerAdd?.(peer.id);
     if (previous.length && !remotes.length) void virtual.stop();
     publish();
@@ -153,6 +178,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
         else if (message.type === 'peer-joined') { updateRemotes([...remotes.filter(p => p.id !== message.peer.id), message.peer]); send(renderer, message); }
         else if (message.type === 'peer-left') { updateRemotes(remotes.filter(p => p.id !== message.id)); send(renderer, message); }
         else if (message.type === 'control') command(message.data);
+        else if (message.type === 'media-stats' && remotes.some(p => p.id === message.from)) { receiverMetrics.set(message.from, { ...message.data, at: Date.now() }); publish(); }
         else if (message.type === 'signal') { if (message.channel === 'host-media') { if (message.data.restart) { virtual.peerRemove?.(message.from); virtual.peerAdd?.(message.from); } else virtual.signal?.(message.from, message.data); } else send(renderer, message); }
       } catch { /* Cloud only sends validated JSON controls. */ }
     });

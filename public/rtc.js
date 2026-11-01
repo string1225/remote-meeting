@@ -12,7 +12,10 @@ export class MeetingRTC {
     const peer = { info, pc, state: 'connecting', media: { audio: false, video: false }, candidates: [], queue: Promise.resolve(), senders: {}, snapshot: {} }; this.peers.set(info.id, peer);
     const signal = data => this.send({ type: 'signal', to: info.id, channel: this.channel, data }); peer.signal = signal;
     pc.onicecandidate = ({ candidate }) => { if (candidate) signal({ candidate: candidate.toJSON() }); };
-    pc.ontrack = ({ track }) => { peer.media[track.kind] = true; this.onTrack?.(peer, track); this.onPeer?.(peer); };
+    pc.ontrack = ({ track, receiver }) => {
+      if (track.kind === 'video') try { if ('jitterBufferTarget' in receiver) receiver.jitterBufferTarget = 0; if ('playoutDelayHint' in receiver) receiver.playoutDelayHint = 0; } catch {}
+      peer.media[track.kind] = true; this.onTrack?.(peer, track); this.onPeer?.(peer);
+    };
     pc.onconnectionstatechange = () => {
       peer.state = pc.connectionState; this.onPeer?.(peer); clearTimeout(peer.reconnect);
       if (['failed', 'disconnected'].includes(peer.state)) peer.reconnect = setTimeout(() => {
@@ -59,7 +62,7 @@ export class MeetingRTC {
   async limit(peer) {
     for (const sender of Object.values(peer.senders)) {
       if (!sender.track) continue; const params = sender.getParameters(); if (!params.encodings?.length) continue;
-      for (const e of params.encodings) { e.maxBitrate = sender.track.kind === 'video' ? 600000 : 48000; if (sender.track.kind === 'video') e.maxFramerate = 15; }
+      for (const e of params.encodings) { e.maxBitrate = sender.track.kind === 'video' ? 250000 : 48000; e.priority = sender.track.kind === 'audio' ? 'high' : 'low'; if (sender.track.kind === 'video') e.maxFramerate = 15; }
       try { await sender.setParameters(params); } catch { /* Encoder parameters vary by browser. */ }
     }
   }
@@ -69,15 +72,32 @@ export class MeetingRTC {
     const output = [];
     for (const peer of this.peers.values()) {
       try {
-        const reports = await peer.pc.getStats(); let pair, receivedAudio = 0, receivedVideo = 0, bytes = 0;
+        const reports = await peer.pc.getStats(); let pair, video, receivedAudio = 0, receivedVideo = 0, bytes = 0;
         for (const r of reports.values()) {
           if (r.type === 'transport') pair = reports.get(r.selectedCandidatePairId);
-          if (r.type === 'inbound-rtp') { bytes += r.bytesReceived || 0; if (r.kind === 'audio') receivedAudio += r.bytesReceived || 0; else receivedVideo += r.framesDecoded || 0; }
+          if (r.type === 'inbound-rtp') { bytes += r.bytesReceived || 0; if (r.kind === 'audio') receivedAudio += r.bytesReceived || 0; else { receivedVideo += r.framesDecoded || 0; video = r; } }
         }
         const local = pair && reports.get(pair.localCandidateId), remote = pair && reports.get(pair.remoteCandidateId);
         const relay = local?.candidateType === 'relay' || remote?.candidateType === 'relay';
         peer.link = pair ? relay ? '服务器转发' : '异常：未使用转发' : ''; this.onPeer?.(peer);
-        output.push({ id: peer.info.id, state: peer.pc.connectionState, transport: pair ? relay ? 'relay' : 'p2p' : 'connecting', localCandidate: local?.candidateType, remoteCandidate: remote?.candidateType, receivedAudio, receivedVideo, receivedBytes: bytes, rtt: pair?.currentRoundTripTime });
+        const now = performance.now(), previous = peer.snapshot.metrics;
+        const elapsed = previous ? (now - previous.now) / 1000 : 0;
+        const diff = key => Math.max(0, (video?.[key] || 0) - (previous?.video?.[key] || 0));
+        const decoded = diff('framesDecoded'), emitted = diff('jitterBufferEmittedCount');
+        const receiver = peer.pc.getReceivers().find(r => r.track.kind === 'video');
+        const sync = receiver?.getSynchronizationSources?.()[0];
+        const arrivalLagMs = previous && sync && previous.rtpTimestamp != null && decoded > 0 ? Math.max(0, previous.arrivalLagMs + now - previous.now - ((sync.rtpTimestamp - previous.rtpTimestamp) >>> 0) / 90) : previous?.arrivalLagMs || 0;
+        const metrics = {
+          incomingKbps: elapsed ? Math.max(0, bytes - previous.bytes) * 8 / elapsed / 1000 : 0,
+          videoFps: elapsed ? decoded / elapsed : video?.framesPerSecond || 0,
+          jitterBufferMs: emitted ? diff('jitterBufferDelay') / emitted * 1000 : 0,
+          arrivalLagMs, decodeMs: decoded ? diff('totalDecodeTime') / decoded * 1000 : 0,
+          lossPercent: diff('packetsReceived') + diff('packetsLost') ? diff('packetsLost') * 100 / (diff('packetsReceived') + diff('packetsLost')) : 0,
+          rttMs: (pair?.currentRoundTripTime || 0) * 1000
+        };
+        peer.snapshot.metrics = { now, video, bytes, rtpTimestamp: sync?.rtpTimestamp, arrivalLagMs };
+        if (this.channel === 'host-media' && this.receive && video) this.send({ type: 'media-stats', data: metrics });
+        output.push({ id: peer.info.id, state: peer.pc.connectionState, transport: pair ? relay ? 'relay' : 'p2p' : 'connecting', localCandidate: local?.candidateType, remoteCandidate: remote?.candidateType, relayProtocol: local?.relayProtocol, receivedAudio, receivedVideo, receivedBytes: bytes, rtt: pair?.currentRoundTripTime, ...metrics });
       } catch { /* The connection may close during collection. */ }
     }
     this.lastStats = output; return output;
