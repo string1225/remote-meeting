@@ -31,7 +31,7 @@ class RtcVideoTests(unittest.TestCase):
     def test_h264_bitstream_uses_bounded_canvas_and_lower_encoder_target(self):
         for width, height in [(1280, 720), (960, 720), (640, 360)]:
             codec, name = worker.video_encoder(width, height, 15, 'libx264')
-            self.assertEqual(codec.bit_rate, 900000)
+            self.assertEqual(codec.bit_rate, 1500000)
             self.assertEqual(name, 'libx264')
             frame = av.VideoFrame(width, height, 'yuv420p')
             frame.pts, frame.time_base = 90000, codec.time_base
@@ -70,8 +70,8 @@ class RtcFlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_audio_bypasses_a_waiting_video_pacer(self):
         from rtc_flow import TransportPacer, video_budget, video_framerate
-        self.assertEqual(video_budget(1), 900000)
-        self.assertEqual(video_budget(2), 600000)
+        self.assertEqual(video_budget(1), 1500000)
+        self.assertEqual(video_budget(2), 900000)
         self.assertEqual(video_budget(2, [400000]), 340000)
         self.assertEqual(video_budget(1, [100000]), 250000)
         self.assertEqual(video_framerate(30, 30, 2), 22)
@@ -90,6 +90,33 @@ class RtcFlowTests(unittest.IsolatedAsyncioTestCase):
         await video
         self.assertEqual(sent, [22, 11])
 
+    async def test_stalled_video_is_discarded_without_blocking_audio(self):
+        from rtc_flow import TransportPacer
+        pacer = TransportPacer(None, lambda: 1500000, audio_ssrcs=[22])
+        pacer.queued_bytes = lambda: 100000
+        sent, discarded = [], []
+        async def send(data): sent.append(int.from_bytes(data[8:12], 'big'))
+        def rtp(ssrc): return b'\x80\x60' + b'\0'*6 + ssrc.to_bytes(4, 'big') + b'payload'
+        with patch('rtc_flow.MAX_VIDEO_SEND_DELAY', 0.05):
+            video = asyncio.create_task(pacer.send(rtp(11), send, discard=lambda: discarded.append(True)))
+            await asyncio.sleep(0)
+            await asyncio.wait_for(pacer.send(rtp(22), send), 0.03)
+            self.assertFalse(await asyncio.wait_for(video, 0.15))
+        self.assertEqual(sent, [22])
+        self.assertEqual(discarded, [True])
+        self.assertFalse(await pacer.send(rtp(11), send))
+        self.assertEqual(pacer.dropped_frames, 1)
+
+    async def test_short_rtcp_feedback_bypasses_a_congested_video_pacer(self):
+        from rtc_flow import TransportPacer
+        pacer = TransportPacer(None, lambda: 1500000)
+        pacer.queued_bytes = lambda: 100000
+        packet = b'\x80\xce\x00\x01' + (11).to_bytes(4, 'big')
+        sent = []
+        async def send(data): sent.append(data)
+        await asyncio.wait_for(pacer.send(packet, send), 0.03)
+        self.assertEqual(sent, [packet])
+
     async def test_sender_reports_use_capture_time_and_keep_rtt_matching(self):
         from rtc_flow import capture_ntp, pace_peer
         with patch('rtc_flow.time.monotonic', return_value=100), patch('rtc_flow.time.time', return_value=1000):
@@ -104,10 +131,30 @@ class RtcFlowTests(unittest.IsolatedAsyncioTestCase):
         pace_peer(pc, lambda: 900000)
         data = b'\x80\x60\0\0' + (1234).to_bytes(4, 'big') + (11).to_bytes(4, 'big')
         await transport._send_rtp(data)
+        sender.track.capture_ntp = timestamp + (5 << 32)
+        # A NACK retransmission must retain the original frame clock rather
+        # than remapping old RTP data to the newest capture time.
+        await transport._send_rtp(data)
         report = SimpleNamespace(ssrc=11, sender_info=SimpleNamespace(rtp_timestamp=1234, ntp_timestamp=0))
         await sender._send_rtcp([report])
         self.assertEqual(report.sender_info.ntp_timestamp, timestamp)
         self.assertEqual(sender._RTCRtpSender__lsr, (timestamp >> 16) & 0xffffffff)
+
+    async def test_only_real_remb_feedback_becomes_a_network_estimate(self):
+        from rtc_flow import pace_peer
+        from aiortc.rtp import RtcpPsfbPacket, RTCP_PSFB_APP, pack_remb_fci
+        received = []
+        async def send(data): pass
+        async def feedback(packet): received.append(packet)
+        transport = SimpleNamespace(_send_rtp=send, transport=SimpleNamespace(iceGatherer=SimpleNamespace(_connection=SimpleNamespace(_nominated={}))))
+        sender = SimpleNamespace(_ssrc=11, track=SimpleNamespace(), transport=transport, _send_rtcp=send, _handle_rtcp_packet=feedback)
+        pc = SimpleNamespace(getTransceivers=lambda: [SimpleNamespace(sender=sender, kind='video')], getSenders=lambda: [sender])
+        pace_peer(pc, lambda: 1500000)
+        self.assertFalse(hasattr(sender, '_meeting_bandwidth'))
+        packet = RtcpPsfbPacket(fmt=RTCP_PSFB_APP, ssrc=22, media_ssrc=0, fci=pack_remb_fci(800000, [11]))
+        await sender._handle_rtcp_packet(packet)
+        self.assertEqual(sender._meeting_bandwidth[1], 800000)
+        self.assertEqual(received, [packet])
 
 
 if __name__ == '__main__':

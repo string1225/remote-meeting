@@ -25,7 +25,7 @@ try {
     assert.equal(await a.evaluate(() => window.testPeers.flatMap(pc => pc.getReceivers()).find(r => r.track.kind === 'audio').track.id), audioTrack);
   }
   await stack.host.waitForFunction(() => hostDiagnostics().peers.some(p => p.receiver?.incomingKbps > 0));
-  assert.ok(stack.local.hostStatus().virtualCamera.targetBitrate <= 600000);
+  assert.ok(stack.local.hostStatus().virtualCamera.targetBitrate <= 900000);
   assert.deepEqual(stack.errors, []);
   console.log('PASS: three quality profiles synchronize across host and two viewers; live resolution switches preserve the audio track and continuous audio packets; shared video budget and receiver metrics are active.');
 } catch (error) {

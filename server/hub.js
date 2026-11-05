@@ -144,6 +144,7 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
   cleanup.unref();
   return {
     status: () => ({ online: !!host, ...hostState, participants: connected().length, capacity: 2 }),
+    machineStatus: () => ({ online: !!host, hostId: host?.id || null, state: hostState.state, participants: connected().length }),
     reserve(session, req) {
       prune();
       if (!host) throw error(503, '现场主机尚未上线，请先启动主机常驻程序');

@@ -26,6 +26,20 @@ async function fixture(t, options = {}) {
 }
 const cookieOf = response => response.headers.get('set-cookie').split(';')[0];
 
+test('machine health exposes registration only to the authenticated host without browser origins', async t => {
+  const f = await fixture(t);
+  const url = f.url + '/api/agent/status';
+  assert.equal((await fetch(url)).status, 401);
+  assert.equal((await fetch(url, { headers: { Authorization: 'Bearer ' + agentKey, Origin: f.url } })).status, 401);
+  const headers = { Authorization: 'Bearer ' + agentKey };
+  assert.deepEqual(await (await fetch(url, { headers })).json(), { online: false, hostId: null, state: 'offline', participants: 0 });
+  const host = await f.client({ agent: true }); const joined = await host.next('joined');
+  const status = await (await fetch(url, { headers })).json();
+  assert.equal(status.online, true); assert.equal(status.hostId, joined.self.id);
+  assert.equal(JSON.stringify(status).includes(agentKey), false);
+  assert.equal((await fetch(url, { method: 'POST', headers })).status, 405);
+});
+
 test('password authentication, no anonymous admission, host machine key and origin validation', async t => {
   const f = await fixture(t);
   assert.equal((await f.login('admin', 'wrong')).status, 401);

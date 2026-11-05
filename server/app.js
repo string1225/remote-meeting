@@ -72,6 +72,11 @@ export function createMeetingServer(options = {}) {
     try {
       const path = new URL(req.url, 'http://localhost').pathname;
       if (req.method === 'GET' && path === '/api/health') return json(res, 200, { status: 'ok', mode: 'web-meeting', transport: 'relay' });
+      if (path === '/api/agent/status') {
+        if (req.headers.origin || !authenticateAgent(req.headers.authorization, env.HOST_AGENT_KEY)) return json(res, 401, { error: '主机认证失败' });
+        if (req.method !== 'GET') return json(res, 405, { error: '不支持的操作' });
+        return json(res, 200, hub.machineStatus());
+      }
       // Machine-authenticated management is scoped to remote accounts. The key
       // stays in the local Node service; browser sessions cannot use this route.
       if (path === '/api/agent/users' || path.startsWith('/api/agent/users/')) {

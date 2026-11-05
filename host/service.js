@@ -46,7 +46,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker, hea
     else if (message.type === 'worker-error') { mediaStatus.error = message.message; }
     else if (message.type === 'peer-state' && remotes.some(p => p.id === message.id)) nativeStates.set(message.id, message.state);
     else if (message.type === 'viewport-applied') view = normalizeView(message);
-    else if (message.type === 'metrics') virtualStatus = { ...virtualStatus, measuredFps: message.fps, encoder: message.encoder, encodeMs: message.encodeMs, renderMs: message.renderMs, targetBitrate: message.targetBitrate, encodedKbps: message.encodedKbps, largestFrameBytes: message.largestFrameBytes };
+    else if (message.type === 'metrics') virtualStatus = { ...virtualStatus, measuredFps: message.fps, encoder: message.encoder, encodeMs: message.encodeMs, renderMs: message.renderMs, targetBitrate: message.targetBitrate, encodedKbps: message.encodedKbps, largestFrameBytes: message.largestFrameBytes, ...(virtualStatus.output ? { output: { ...virtualStatus.output, targetBitrate: message.targetBitrate ?? virtualStatus.output.targetBitrate } } : {}) };
     publish();
   });
   function json(res, status, data) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); }
@@ -58,6 +58,11 @@ export function createHostService(config, { cameraFactory = createRtcWorker, hea
     // Local service is loopback-only and rejects DNS rebinding Host headers.
     if (req.headers.host !== `127.0.0.1:${server.address().port}`) { res.writeHead(403); res.end(); return; }
     try {
+      if (req.url === '/api/connection/reconnect') {
+        if (req.method !== 'POST' || req.headers.origin !== `http://127.0.0.1:${server.address().port}` || req.headers['x-host-console'] !== '1') return json(res, 403, { error: '请在本机操作' });
+        disconnectCloud(); paused = false; connectCloud();
+        return json(res, 202, { accepted: true });
+      }
       if (req.url === '/api/video') {
         if (req.headers.origin !== `http://127.0.0.1:${server.address().port}` || req.headers['x-host-console'] !== '1' || req.method !== 'PUT' || req.headers['content-type'] !== 'application/json') return json(res, 403, { error: '请在本机控制台操作' });
         let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 256) return json(res, 413, { error: '请求过长' }); }
@@ -202,7 +207,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker, hea
       activity();
       try {
         const message = JSON.parse(raw.toString());
-          if (message.type === 'joined') { clearTimeout(registrationTimer); attempt = 0; cloudWelcome = { self: message.self, iceServers: message.iceServers }; cloudConnection.lastRegisteredAt = new Date().toISOString(); connectionState('registered'); virtual.configure?.(message.iceServers); updateRemotes(message.peers); mediaConfig(); }
+          if (message.type === 'joined') { clearTimeout(registrationTimer); attempt = 0; cloudWelcome = { self: message.self, iceServers: message.iceServers }; cloudConnection.lastRegisteredAt = new Date().toISOString(); cloudConnection.hostId = message.self.id; connectionState('registered'); virtual.configure?.(message.iceServers); updateRemotes(message.peers); mediaConfig(); }
           else if (message.type === 'ice-config' && cloudWelcome) { cloudWelcome.iceServers = message.iceServers; virtual.configure?.(message.iceServers); mediaConfig(); }
         else if (message.type === 'peer-joined') { updateRemotes([...remotes.filter(p => p.id !== message.peer.id), message.peer]); send(renderer, message); }
         else if (message.type === 'peer-left') { updateRemotes(remotes.filter(p => p.id !== message.id)); send(renderer, message); }

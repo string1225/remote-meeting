@@ -36,6 +36,7 @@ class Subscription(MediaStreamTrack):
         self.kind, self.source = source.kind, source
         self.queue = asyncio.Queue(maxsize=8 if self.kind == 'video' else 3)
         self.capture_ntp = None
+        self.capture_monotonic = None
         self.dropped = 0
         self.waiting_keyframe = self.kind == 'video'
         source.listeners.add(self)
@@ -68,7 +69,15 @@ class Subscription(MediaStreamTrack):
         packet.pts = packet.dts = pts
         packet.time_base = base
         self.capture_ntp = capture_ntp(pts, base)
+        self.capture_monotonic = float(pts * base)
         return packet
+
+    def discard_video(self):
+        if self.kind != 'video': return
+        self.dropped += 1 + self.queue.qsize()
+        while not self.queue.empty(): self.queue.get_nowait()
+        self.waiting_keyframe = True
+        self.source.keyframe()
 
     def stop(self):
         super().stop()
@@ -165,8 +174,9 @@ class Devices:
                     except queue.Empty: continue
                     start = time.perf_counter()
                     if abs(codec.bit_rate - self.target_bitrate) > codec.bit_rate * 0.15:
-                        codec, name = video_encoder(width, height, fps, name, self.target_bitrate)
-                        self.force_keyframe.set()
+                        # QSV re-opening stalls the capture/encode pipeline for
+                        # hundreds of ms. Reconfigure its rate on the live codec.
+                        codec.bit_rate = self.target_bitrate
                     frame = av.VideoFrame.from_ndarray(cv2.cvtColor(image, cv2.COLOR_BGR2YUV_I420), format='yuv420p')
                     frame.pts, frame.time_base = pts, Fraction(1, 90000)
                     if encoded[0] % fps == 0 or self.force_keyframe.is_set():
@@ -417,8 +427,8 @@ async def main():
                         active_tracks.add(track)
                         if pc.connectionState == 'connected': drops += max(0, track.dropped - previous_drops.get(track, track.dropped))
                         previous_drops[track] = track.dropped
-                    packetizer = getattr(sender, '_RTCRtpSender__encoder', None)
-                    if packetizer: estimates.append(getattr(packetizer, 'target_bitrate', 0))
+                    measured = getattr(sender, '_meeting_bandwidth', None)
+                    if measured and time.monotonic() - measured[0] < 10: estimates.append(measured[1])
             previous_drops = {track: count for track, count in previous_drops.items() if track in active_tracks}
             devices.target_bitrate = video_budget(len(peers), estimates)
             devices.target_fps = video_framerate(devices.config['output']['fps'], devices.target_fps, drops)

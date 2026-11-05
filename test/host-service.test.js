@@ -88,6 +88,17 @@ test('missing registration acknowledgement forces a retry even when WebSocket po
   assert.ok(f.changes.some(s => s.lastError.includes('registration timed out')));
 });
 
+test('local recovery endpoint requires same-origin console headers and re-registers the host', async t => {
+  const f = await cloudHealthFixture(t);
+  await waitFor(() => f.server.hostStatus().online);
+  const origin = `http://127.0.0.1:${f.server.address().port}`, url = origin + '/api/connection/reconnect';
+  assert.equal((await fetch(url, { method: 'POST' })).status, 403);
+  assert.equal((await fetch(url, { method: 'POST', headers: { Origin: 'https://attacker.example', 'X-Host-Console': '1' } })).status, 403);
+  assert.equal((await fetch(url, { method: 'POST', headers: { Origin: origin, 'X-Host-Console': '1' } })).status, 202);
+  await waitFor(() => f.connections.length === 2);
+  await waitFor(() => f.server.hostStatus().online);
+});
+
 async function cameraLifecycle(t, state = 'ready') {
   const cloud = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await once(cloud, 'listening');

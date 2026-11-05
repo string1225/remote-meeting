@@ -43,6 +43,10 @@ try {
     if (-not $meetingAcquired) { Write-MeetingLog 'Another supervisor already owns this installation in this session.'; exit 0 }
     $meetingIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     Write-MeetingLog ('Supervisor started; user=' + $meetingIdentity + '; session=' + [System.Diagnostics.Process]::GetCurrentProcess().SessionId)
+    if ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value -notin @('S-1-5-18','S-1-5-19','S-1-5-20') -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'install-health-check.ps1'))) {
+        try { & (Join-Path $PSScriptRoot 'install-health-check.ps1') | Out-Null; Write-MeetingLog 'Daily health checks and minute wake guard registered for the desktop user.' }
+        catch { Write-MeetingLog ('Health task registration failed: ' + $_.Exception.Message) }
+    }
     $meetingFailures = 0
     $meetingLastState = ''
     while ($true) {
