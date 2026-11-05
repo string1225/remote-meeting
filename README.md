@@ -66,7 +66,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File host/install.ps1
 
 本地服务仅监听 127.0.0.1:3034。/api/status 返回状态，/api/preview 返回最新现场预览。POST /api/devices/camera 或 /api/devices/microphone，JSON 为 {"enabled":true/false}，需要同源 Origin、Content-Type:application/json 和 X-Host-Console:1。远端通过已认证的云端控制连接调用同一后端控制逻辑。机器凭据不进入浏览器。
 
-Startup 中的 Remote Meeting Host.lnk 启动隐藏监督进程，意外退出会恢复服务。现场窗口关闭后自动重开。日志在 .local/host.log，取消自启动时只删除本服务的专用快捷方式。
+Startup 中的 Remote Meeting Host.lnk 在当前 Windows 用户登录后启动隐藏监督进程。监督进程会重试配置、运行时和进程启动失败，每 10 秒检查本地接口，连续 3 次无响应时重启自己启动的主机进程；发现已有主机时只监测，不重复启动。现场窗口关闭后自动重开。网络暂时不可用时，主机持续重连云端。
+
+本机状态的 online 需要收到云端注册确认且心跳有效；每 15 秒检查连接，45 秒没有收到服务器活动时断开失效连接并重连，注册确认超过 12 秒也会重试。睡眠恢复后沿用此检测，不会因旧 WebSocket 仍标记 OPEN 而一直显示在线。/api/status 的 cloudConnection 包含注册状态、最近注册/接收时间和错误。云端连接、退出和界面日志在 .local/host.log；监督进程启动身份、主机退出码、健康检查与重启记录在 .local/supervisor.log；子进程输出和错误在 .local/host-process.log、.local/host-process-error.log。取消登录自启动时删除本用户 Startup 中的专用快捷方式。
 
 旧的 MFCreateVirtualCamera 原生组件和 OBS 仍独立保留，当前网页会议不经过这些虚拟设备。需要旧系统摄像头输出时可使用仓库中单独的 virtual-camera.py / 安装脚本，先关闭本模式的现场采集，避免抢占原设备。
 

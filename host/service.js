@@ -10,13 +10,14 @@ import { createVideoSettings, validateVideoProfile } from './video-settings.js';
 const assets = new Map([['/', ['host/index.html', 'text/html']], ['/host-app.js', ['host/app.js', 'text/javascript']], ['/style.css', ['public/style.css', 'text/css']], ['/host.css', ['host/style.css', 'text/css']], ['/host-accounts.js', ['host/accounts.js', 'text/javascript']]]);
 assets.set('/device-controls.js', ['host/device-controls.js', 'text/javascript']);
 for (const [path, type] of [['rtc.js', 'text/javascript'], ['media.js', 'text/javascript'], ['meeting.css', 'text/css'], ['audio-meter.js', 'text/javascript'], ['audio-meter.css', 'text/css'], ['playback-controls.js', 'text/javascript']]) assets.set('/' + path, ['public/' + path, type]);
-export function createHostService(config, { cameraFactory = createRtcWorker } = {}) {
+export function createHostService(config, { cameraFactory = createRtcWorker, heartbeatMs = 15000, heartbeatTimeoutMs = 45000, registrationTimeoutMs = 12000 } = {}) {
   const url = new URL('agent', config.serverUrl);
   if (!['https:', 'http:'].includes(url.protocol) || (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname))) throw new Error('Use an HTTPS cloud URL');
   if (typeof config.agentKey !== 'string' || config.agentKey.length < 32 || config.agentKey.startsWith('replace-')) throw new Error('Missing host agent key');
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   let renderer, cloud, reconnectTimer, attempt = 0, paused = false, stopping = false, remotes = [], cameras = [], view = { zoom: 1, x: 0.5, y: 0.5 }, virtualStatus = { state: 'stopped' };
-  let cloudWelcome, mediaStatus = { video: false, audio: false, error: '' };
+  let cloudWelcome, heartbeatTimer, registrationTimer, lastCloudActivity = 0, mediaStatus = { video: false, audio: false, error: '' };
+  let cloudConnection = { state: 'disconnected', lastRegisteredAt: null, lastError: '' };
   let microphoneStatus = { state: 'stopped' };
   const videoSettings = createVideoSettings(config.videoSettingsFile, config.output?.profile);
   const output = compositeSettings(config.output && !config.videoSettingsFile && !config.output.profile ? config.output : { profile: videoSettings.profile });
@@ -26,7 +27,10 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
   let deviceSaving = false;
   const send = (ws, data) => { if (ws?.readyState === WebSocket.OPEN) { if (ws.bufferedAmount > 256 * 1024) ws.close(1008, 'Slow consumer'); else ws.send(JSON.stringify(data)); } };
   const status = () => ({
-    renderer: renderer?.readyState === WebSocket.OPEN, online: cloud?.readyState === WebSocket.OPEN, paused,
+    service: 'remote-meeting-host', processId: process.pid,
+    renderer: renderer?.readyState === WebSocket.OPEN,
+    online: Boolean(cloud?.readyState === WebSocket.OPEN && cloudWelcome && Date.now() - lastCloudActivity < heartbeatTimeoutMs),
+    cloudConnection: { ...cloudConnection, lastReceivedAt: lastCloudActivity ? new Date(lastCloudActivity).toISOString() : null }, paused,
     state: virtualStatus.state === 'ready' ? 'capturing' : ['starting', 'stopping'].includes(virtualStatus.state) ? 'starting' : virtualStatus.state === 'error' ? 'error' : 'idle',
     message: virtualStatus.message || '', capturing: virtualStatus.state === 'ready', microphone: mediaStatus.audio, media: mediaStatus, microphoneStatus,
     cameras, output, videoChanging, view: { ...view, camera: 0, shared: true, sourceWidth: cameras[0]?.width || 0, sourceHeight: cameras[0]?.height || 0, outputWidth: output.width, outputHeight: output.height },
@@ -165,15 +169,40 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
   }
   function connectCloud() {
     clearTimeout(reconnectTimer);
+    clearInterval(heartbeatTimer); clearTimeout(registrationTimer);
     if (paused || stopping) return;
+    cloudWelcome = null;
+    connectionState('connecting');
     const ws = new WebSocket(url, { headers: { Authorization: 'Bearer ' + config.agentKey }, maxPayload: 64 * 1024, handshakeTimeout: 12000 });
     cloud = ws;
-    ws.on('open', () => { attempt = 0; publish(); });
+    const activity = () => { if (ws === cloud) lastCloudActivity = Date.now(); };
+    const expired = reason => {
+      if (ws !== cloud) return;
+      connectionState('reconnecting', reason);
+      // A socket can stay OPEN across sleep even after the server drops it.
+      // Force its close event so the normal reconnect path runs again.
+      ws.terminate();
+    };
+    ws.on('ping', activity); ws.on('pong', activity);
+    ws.on('open', () => {
+      if (ws !== cloud) return;
+      activity();
+      registrationTimer = setTimeout(() => expired('Cloud registration timed out'), registrationTimeoutMs);
+      registrationTimer.unref();
+      heartbeatTimer = setInterval(() => {
+        if (ws !== cloud) return;
+        if (Date.now() - lastCloudActivity >= heartbeatTimeoutMs) return expired('Cloud heartbeat timed out; reconnecting after sleep or network loss');
+        if (ws.readyState === WebSocket.OPEN) ws.ping();
+      }, heartbeatMs);
+      heartbeatTimer.unref();
+      publish();
+    });
     ws.on('message', raw => {
       if (ws !== cloud) return;
+      activity();
       try {
         const message = JSON.parse(raw.toString());
-          if (message.type === 'joined') { cloudWelcome = { self: message.self, iceServers: message.iceServers }; virtual.configure?.(message.iceServers); updateRemotes(message.peers); mediaConfig(); }
+          if (message.type === 'joined') { clearTimeout(registrationTimer); attempt = 0; cloudWelcome = { self: message.self, iceServers: message.iceServers }; cloudConnection.lastRegisteredAt = new Date().toISOString(); connectionState('registered'); virtual.configure?.(message.iceServers); updateRemotes(message.peers); mediaConfig(); }
           else if (message.type === 'ice-config' && cloudWelcome) { cloudWelcome.iceServers = message.iceServers; virtual.configure?.(message.iceServers); mediaConfig(); }
         else if (message.type === 'peer-joined') { updateRemotes([...remotes.filter(p => p.id !== message.peer.id), message.peer]); send(renderer, message); }
         else if (message.type === 'peer-left') { updateRemotes(remotes.filter(p => p.id !== message.id)); send(renderer, message); }
@@ -182,15 +211,23 @@ export function createHostService(config, { cameraFactory = createRtcWorker } = 
         else if (message.type === 'signal') { if (message.channel === 'host-media') { if (message.data.restart) { virtual.peerRemove?.(message.from); virtual.peerAdd?.(message.from); } else virtual.signal?.(message.from, message.data); } else send(renderer, message); }
       } catch { /* Cloud only sends validated JSON controls. */ }
     });
-    ws.on('error', () => {});
-    ws.on('close', () => {
+    ws.on('error', error => { if (ws === cloud) connectionState('reconnecting', String(error.message).slice(0, 240)); });
+    ws.on('close', (code, reason) => {
       if (ws !== cloud) return;
+      clearInterval(heartbeatTimer); clearTimeout(registrationTimer);
       cloud = null; cloudWelcome = null; updateRemotes([]); send(renderer, { type: 'media-disconnected' });
+      connectionState('disconnected', cloudConnection.lastError || `Cloud connection closed (${code}): ${String(reason).slice(0, 120)}`);
       reconnectTimer = setTimeout(connectCloud, Math.min(1000 * 2 ** attempt++, 15000));
     });
   }
+  function connectionState(state, error = '') {
+    cloudConnection = { ...cloudConnection, state, lastError: error };
+    server.emit('cloud-state', { ...cloudConnection });
+  }
   function disconnectCloud() {
-    clearTimeout(reconnectTimer); const old = cloud; cloud = null; cloudWelcome = null; old?.terminate(); updateRemotes([]); send(renderer, { type: 'media-disconnected' });
+    clearTimeout(reconnectTimer); clearInterval(heartbeatTimer); clearTimeout(registrationTimer);
+    const old = cloud; cloud = null; cloudWelcome = null; old?.terminate(); updateRemotes([]); send(renderer, { type: 'media-disconnected' });
+    connectionState(stopping ? 'stopped' : 'paused');
   }
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
   server.on('upgrade', (req, socket, head) => {

@@ -34,10 +34,59 @@ test('native device APIs work without a renderer and require same-origin console
   assert.deepEqual(calls, [['microphone', true], ['microphone', false], ['camera', true, 1280], ['camera', false]]);
 });
 
-async function waitFor(predicate) {
-  for (let i = 0; i < 100; i++) { if (predicate()) return; await delay(10); }
+async function waitFor(predicate, timeout = 1000) {
+  for (let i = 0; i < timeout / 10; i++) { if (predicate()) return; await delay(10); }
   assert.fail('Host did not reach the expected state');
 }
+
+async function cloudHealthFixture(t, options = {}) {
+  const cloud = new WebSocketServer({ port: 0, host: '127.0.0.1', autoPong: options.autoPong !== false });
+  await once(cloud, 'listening');
+  const connections = [], changes = [];
+  const joined = ws => ws.send(JSON.stringify({ type: 'joined', self: { id: 'host', role: 'host' }, peers: [], iceServers: [] }));
+  cloud.on('connection', ws => { connections.push(ws); if (options.register !== false) joined(ws); });
+  const server = createHostService({ serverUrl: `http://127.0.0.1:${cloud.address().port}/`, agentKey: 'cloud-watchdog-test-machine-key-32-characters' }, {
+    cameraFactory: () => ({ shutdown() {} }), heartbeatMs: 20, heartbeatTimeoutMs: 140, registrationTimeoutMs: options.registrationTimeoutMs || 1000
+  });
+  server.on('cloud-state', state => changes.push(state));
+  t.after(async () => { await server.shutdown(); for (const ws of cloud.clients) ws.terminate(); await new Promise(resolve => cloud.close(resolve)); });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  await waitFor(() => connections.length > 0);
+  return { server, connections, changes, joined };
+}
+
+test('an open socket is offline until the cloud acknowledges host registration', async t => {
+  const f = await cloudHealthFixture(t, { register: false });
+  assert.equal(f.server.hostStatus().online, false);
+  f.joined(f.connections[0]);
+  await waitFor(() => f.server.hostStatus().online);
+  assert.equal(f.server.hostStatus().cloudConnection.state, 'registered');
+  assert.ok(f.server.hostStatus().cloudConnection.lastRegisteredAt);
+});
+
+test('a silent half-open connection is terminated and registers again without restarting the host', { timeout: 5000 }, async t => {
+  const f = await cloudHealthFixture(t, { autoPong: false });
+  await waitFor(() => f.server.hostStatus().online);
+  await waitFor(() => !f.server.hostStatus().online);
+  await waitFor(() => f.connections.length >= 2, 3000);
+  await waitFor(() => f.server.hostStatus().online);
+  assert.ok(f.changes.some(s => s.lastError.includes('heartbeat timed out')));
+});
+
+test('idle registered connections stay online through heartbeat replies', { timeout: 3000 }, async t => {
+  const f = await cloudHealthFixture(t);
+  await waitFor(() => f.server.hostStatus().online);
+  await delay(450);
+  assert.equal(f.server.hostStatus().online, true);
+  assert.equal(f.connections.length, 1);
+});
+
+test('missing registration acknowledgement forces a retry even when WebSocket pongs arrive', { timeout: 5000 }, async t => {
+  const f = await cloudHealthFixture(t, { register: false, registrationTimeoutMs: 100 });
+  await waitFor(() => f.connections.length >= 2, 3000);
+  assert.equal(f.server.hostStatus().online, false);
+  assert.ok(f.changes.some(s => s.lastError.includes('registration timed out')));
+});
 
 async function cameraLifecycle(t, state = 'ready') {
   const cloud = new WebSocketServer({ port: 0, host: '127.0.0.1' });

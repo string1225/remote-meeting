@@ -10,11 +10,12 @@ config.videoSettingsFile = resolve(config.videoSettingsFile || '.local/video.jso
 await mkdir('.local', { recursive: true });
 async function log(message) { const line = `${new Date().toISOString()} ${message}\n`; console.log(line.trim()); await appendFile('.local/host.log', line); }
 const server = createHostService(config);
+server.on('cloud-state', state => void log(`Cloud ${state.state}${state.lastError ? ': ' + state.lastError : ''}`).catch(() => {}));
 server.listen(config.port || 3034, '127.0.0.1'); await once(server, 'listening');
 await log(`Host listener ready on 127.0.0.1:${server.address().port}`);
 let stopping = false, browser;
-async function stop() { stopping = true; await browser?.close().catch(() => {}); await server.shutdown(); process.exit(0); }
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, stop);
+async function stop(signal) { if (stopping) return; stopping = true; await log('Host shutting down after ' + signal).catch(() => {}); await browser?.close().catch(() => {}); await server.shutdown(); process.exit(0); }
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => void stop(signal));
 while (!stopping) {
   try {
     browser = await chromium.launch({ ...(config.browserPath ? { executablePath: config.browserPath } : { channel: 'msedge' }), headless: config.headless === true, args: ['--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'], ignoreDefaultArgs: ['--mute-audio'] });
