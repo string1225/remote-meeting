@@ -4,6 +4,7 @@ import socket
 import time
 
 SINGLE_VIDEO_BITRATE = 1_500_000
+ONE_WAY_VIDEO_BITRATE = 2_200_000
 # Keep two viewers plus reverse video/audio inside the recorded 3 Mbps egress.
 SHARED_VIDEO_BITRATE = 900_000
 MIN_VIDEO_BITRATE = 250_000
@@ -16,8 +17,9 @@ def capture_ntp(pts, time_base):
     return int((time.time() - age + 2208988800) * (1 << 32))
 
 
-def video_budget(peers, estimates=()):
-    ceiling = SHARED_VIDEO_BITRATE if peers > 1 else SINGLE_VIDEO_BITRATE
+def video_budget(peers, estimates=(), remote_video=True):
+    # Unknown remote media keeps the duplex allowance until explicitly off.
+    ceiling = SHARED_VIDEO_BITRATE if peers > 1 else SINGLE_VIDEO_BITRATE if remote_video else ONE_WAY_VIDEO_BITRATE
     estimates = [int(value * 0.85) for value in estimates if value and 0 < value < ceiling]
     return max(MIN_VIDEO_BITRATE, min([ceiling, *estimates]))
 

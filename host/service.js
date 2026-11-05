@@ -22,7 +22,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker, hea
   const videoSettings = createVideoSettings(config.videoSettingsFile, config.output?.profile);
   const output = compositeSettings(config.output && !config.videoSettingsFile && !config.output.profile ? config.output : { profile: videoSettings.profile });
   let videoChanging = false;
-  const nativeStates = new Map(), receiverMetrics = new Map();
+  const nativeStates = new Map(), receiverMetrics = new Map(), remoteMedia = new Map(), returnMetrics = new Map();
   const deviceSettings = createDeviceSettings({ file: config.deviceSettingsFile, fallback: config });
   let deviceSaving = false;
   const send = (ws, data) => { if (ws?.readyState === WebSocket.OPEN) { if (ws.bufferedAmount > 256 * 1024) ws.close(1008, 'Slow consumer'); else ws.send(JSON.stringify(data)); } };
@@ -34,7 +34,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker, hea
     state: virtualStatus.state === 'ready' ? 'capturing' : ['starting', 'stopping'].includes(virtualStatus.state) ? 'starting' : virtualStatus.state === 'error' ? 'error' : 'idle',
     message: virtualStatus.message || '', capturing: virtualStatus.state === 'ready', microphone: mediaStatus.audio, media: mediaStatus, microphoneStatus,
     cameras, output, videoChanging, view: { ...view, camera: 0, shared: true, sourceWidth: cameras[0]?.width || 0, sourceHeight: cameras[0]?.height || 0, outputWidth: output.width, outputHeight: output.height },
-    peers: remotes.map(p => ({ id: p.id, name: p.name, state: nativeStates.get(p.id) || 'connecting', receiver: receiverMetrics.get(p.id) })), virtualCamera: virtualStatus
+    peers: remotes.map(p => ({ id: p.id, name: p.name, state: nativeStates.get(p.id) || 'connecting', media: remoteMedia.get(p.id), receiver: receiverMetrics.get(p.id), returnReceiver: returnMetrics.get(p.id) })), virtualCamera: virtualStatus
   });
   const virtual = cameraFactory({ ...config.virtualCamera, ...config.rtc, output, ...deviceSettings.value, synthetic: config.mediaTest === true || config.rtc?.synthetic === true || config.virtualCamera?.synthetic === true }, message => {
     if (message.type === 'virtual-camera-state') {
@@ -46,7 +46,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker, hea
     else if (message.type === 'worker-error') { mediaStatus.error = message.message; }
     else if (message.type === 'peer-state' && remotes.some(p => p.id === message.id)) nativeStates.set(message.id, message.state);
     else if (message.type === 'viewport-applied') view = normalizeView(message);
-    else if (message.type === 'metrics') virtualStatus = { ...virtualStatus, measuredFps: message.fps, encoder: message.encoder, encodeMs: message.encodeMs, renderMs: message.renderMs, targetBitrate: message.targetBitrate, encodedKbps: message.encodedKbps, largestFrameBytes: message.largestFrameBytes, ...(virtualStatus.output ? { output: { ...virtualStatus.output, targetBitrate: message.targetBitrate ?? virtualStatus.output.targetBitrate } } : {}) };
+    else if (message.type === 'metrics') virtualStatus = { ...virtualStatus, measuredFps: message.fps, encoder: message.encoder, encodeMs: message.encodeMs, renderMs: message.renderMs, videoCeiling: message.videoCeiling, targetBitrate: message.targetBitrate, encodedKbps: message.encodedKbps, largestFrameBytes: message.largestFrameBytes, ...(virtualStatus.output ? { output: { ...virtualStatus.output, targetBitrate: message.targetBitrate ?? virtualStatus.output.targetBitrate } } : {}) };
     publish();
   });
   function json(res, status, data) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); }
@@ -167,7 +167,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker, hea
   }
   function updateRemotes(next) {
     const previous = remotes; remotes = next.filter(p => p.role === 'remote');
-    for (const peer of previous) if (!remotes.some(p => p.id === peer.id)) { virtual.peerRemove?.(peer.id); nativeStates.delete(peer.id); receiverMetrics.delete(peer.id); }
+    for (const peer of previous) if (!remotes.some(p => p.id === peer.id)) { virtual.peerRemove?.(peer.id); nativeStates.delete(peer.id); receiverMetrics.delete(peer.id); remoteMedia.delete(peer.id); returnMetrics.delete(peer.id); }
     for (const peer of remotes) virtual.peerAdd?.(peer.id);
     if (previous.length && !remotes.length) void virtual.stop();
     publish();
@@ -213,7 +213,18 @@ export function createHostService(config, { cameraFactory = createRtcWorker, hea
         else if (message.type === 'peer-left') { updateRemotes(remotes.filter(p => p.id !== message.id)); send(renderer, message); }
         else if (message.type === 'control') command(message.data);
         else if (message.type === 'media-stats' && remotes.some(p => p.id === message.from)) { receiverMetrics.set(message.from, { ...message.data, at: Date.now() }); publish(); }
-        else if (message.type === 'signal') { if (message.channel === 'host-media') { if (message.data.restart) { virtual.peerRemove?.(message.from); virtual.peerAdd?.(message.from); } else virtual.signal?.(message.from, message.data); } else send(renderer, message); }
+        else if (message.type === 'signal') {
+          if (message.channel === 'host-media') {
+            if (message.data.restart) { virtual.peerRemove?.(message.from); virtual.peerAdd?.(message.from); const media = remoteMedia.get(message.from); if (media) virtual.signal?.(message.from, { media }); }
+            else virtual.signal?.(message.from, message.data);
+          } else {
+            if (message.data.media && remotes.some(p => p.id === message.from)) {
+              const media = { audio: message.data.media.audio === true, video: message.data.media.video === true };
+              remoteMedia.set(message.from, media); virtual.signal?.(message.from, { media }); publish();
+            }
+            send(renderer, message);
+          }
+        }
       } catch { /* Cloud only sends validated JSON controls. */ }
     });
     ws.on('error', error => { if (ws === cloud) connectionState('reconnecting', String(error.message).slice(0, 240)); });
@@ -250,6 +261,7 @@ export function createHostService(config, { cameraFactory = createRtcWorker, hea
         const message = JSON.parse(raw.toString());
         if (message.type === 'control') command(message.data);
         else if (message.type === 'signal' && message.channel === 'remote-media') send(cloud, message);
+        else if (message.type === 'return-media-stats' && remotes.some(p => p.id === message.id)) { returnMetrics.set(message.id, { ...message.data, at: Date.now() }); }
         else if (message.type === 'bridge-pause') { paused = true; disconnectCloud(); }
         else if (message.type === 'bridge-resume') { paused = false; connectCloud(); publish(); }
       } catch { ws.close(1008, 'Invalid local control'); }

@@ -96,7 +96,7 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
         if (agent && msg.type === 'media-reset') { for (const remote of connected()) send(remote.ws, { type: 'media-reset', from: peer.id }); return; }
         if (!agent && msg.type === 'media-stats' && host && msg.data && typeof msg.data === 'object') {
           const data = {};
-          for (const key of ['incomingKbps', 'videoFps', 'jitterBufferMs', 'arrivalLagMs', 'decodeMs', 'lossPercent', 'rttMs']) {
+          for (const key of ['width', 'height', 'incomingKbps', 'videoFps', 'jitterBufferMs', 'arrivalLagMs', 'decodeMs', 'lossPercent', 'rttMs']) {
             if (Number.isFinite(msg.data[key]) && msg.data[key] >= 0 && msg.data[key] <= 1e9) data[key] = msg.data[key];
           }
           send(host.ws, { type: 'media-stats', from: peer.id, data }); return;

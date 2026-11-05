@@ -1,4 +1,6 @@
 // The native backend sends host-media; the local page only receives remote-media.
+export const remoteVideoConstraints = { facingMode: 'user', width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 15, max: 20 } };
+export const remoteVideoBitrate = 800000;
 export class MeetingRTC {
   constructor({ send, stream = new MediaStream(), channel, initiate = false, receive = true, onTrack, onPeer, onRemove, onError = () => {} }) {
     Object.assign(this, { send, stream, channel, initiate, receive, onTrack, onPeer, onRemove, onError }); this.peers = new Map();
@@ -43,7 +45,7 @@ export class MeetingRTC {
             t.direction = this.receive ? 'recvonly' : 'sendonly';
             if (!this.receive) { peer.senders[t.receiver.track.kind] = t.sender; await t.sender.replaceTrack(this.stream.getTracks().find(track => track.kind === t.receiver.track.kind) || null); }
           }
-          await peer.pc.setLocalDescription(await peer.pc.createAnswer()); peer.signal({ description: peer.pc.localDescription }); await this.limit(peer);
+          await peer.pc.setLocalDescription(await peer.pc.createAnswer()); await this.limit(peer); peer.signal({ description: peer.pc.localDescription });
           if (!this.receive) peer.signal({ media: this.flags() });
         }
       } else if (data.candidate) {
@@ -62,7 +64,11 @@ export class MeetingRTC {
   async limit(peer) {
     for (const sender of Object.values(peer.senders)) {
       if (!sender.track) continue; const params = sender.getParameters(); if (!params.encodings?.length) continue;
-      for (const e of params.encodings) { e.maxBitrate = sender.track.kind === 'video' ? 250000 : 48000; e.priority = sender.track.kind === 'audio' ? 'high' : 'low'; if (sender.track.kind === 'video') e.maxFramerate = 15; }
+      for (const e of params.encodings) {
+        const video = sender.track.kind === 'video';
+        e.maxBitrate = video ? remoteVideoBitrate : 48000; e.priority = video ? 'low' : 'high';
+        if (video) { const { width = 1280, height = 720 } = sender.track.getSettings(); e.maxFramerate = 20; e.scaleResolutionDownBy = Math.max(1, width / 1280, height / 720); }
+      }
       try { await sender.setParameters(params); } catch { /* Encoder parameters vary by browser. */ }
     }
   }
@@ -88,6 +94,7 @@ export class MeetingRTC {
         const sync = receiver?.getSynchronizationSources?.()[0];
         const arrivalLagMs = previous && sync && previous.rtpTimestamp != null && decoded > 0 ? Math.max(0, previous.arrivalLagMs + now - previous.now - ((sync.rtpTimestamp - previous.rtpTimestamp) >>> 0) / 90) : previous?.arrivalLagMs || 0;
         const metrics = {
+          width: video?.frameWidth || 0, height: video?.frameHeight || 0,
           incomingKbps: elapsed ? Math.max(0, bytes - previous.bytes) * 8 / elapsed / 1000 : 0,
           videoFps: elapsed ? decoded / elapsed : video?.framesPerSecond || 0,
           jitterBufferMs: emitted ? diff('jitterBufferDelay') / emitted * 1000 : 0,

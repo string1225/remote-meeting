@@ -71,6 +71,9 @@ class RtcFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_audio_bypasses_a_waiting_video_pacer(self):
         from rtc_flow import TransportPacer, video_budget, video_framerate
         self.assertEqual(video_budget(1), 1500000)
+        self.assertEqual(video_budget(1, remote_video=False), 2200000)
+        self.assertEqual(video_budget(1, [1800000], remote_video=False), 1530000)
+        self.assertEqual(video_budget(2, remote_video=False), 900000)
         self.assertEqual(video_budget(2), 900000)
         self.assertEqual(video_budget(2, [400000]), 340000)
         self.assertEqual(video_budget(1, [100000]), 250000)

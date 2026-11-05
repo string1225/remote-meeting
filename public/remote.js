@@ -1,6 +1,6 @@
 import { initAccounts } from './accounts.js';
 import { cropControls } from './crop-controls.js';
-import { MeetingRTC } from './rtc.js';
+import { MeetingRTC, remoteVideoConstraints } from './rtc.js';
 import { LocalMedia, pageFullscreen, preview, remotePlayers } from './media.js';
 import { createAudioMonitor } from './audio-meter.js';
 import { createPlaybackControls } from './playback-controls.js';
@@ -140,7 +140,7 @@ document.addEventListener('account-change', () => {
 $('setup-form').onsubmit = async event => { event.preventDefault(); try { await accounts.ensureLoggedIn(); } catch (error) { notify(error.message, true); } };
 $('join-button').onclick = () => { wantConnect = true; void activate(); };
 $('leave').onclick = () => { wantConnect = false; disconnect(true); peers = []; renderPeers(); $('signal-status').textContent = '通话已退出'; };
-$('camera-toggle').onclick = () => { if (connected) void media.set('video', !media.has('video'), { facingMode: 'user', width: { ideal: 640, max: 640 }, height: { ideal: 360, max: 480 }, frameRate: { ideal: 15, max: 15 } }); };
+$('camera-toggle').onclick = () => { if (connected) void media.set('video', !media.has('video'), remoteVideoConstraints); };
 $('microphone-toggle').onclick = () => { if (connected) { void monitor.activate(); void media.set('audio', !media.has('audio'), micConstraints); } };
 $('host-camera-toggle').onclick = () => {
   if (!send({ type: state === 'capturing' ? 'camera-stop' : 'camera-start' })) return;

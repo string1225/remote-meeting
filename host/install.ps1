@@ -17,5 +17,4 @@ $meetingShortcut.WindowStyle = 7
 $meetingShortcut.Description = 'Remote Meeting host listener and local control window'
 $meetingShortcut.Save()
 Write-Output 'Host listener will start automatically after this Windows user signs in.'
-& (Join-Path $PSScriptRoot 'install-health-check.ps1')
 if (-not $NoStart) { Start-Process -FilePath $meetingPowerShell -ArgumentList $meetingShortcut.Arguments -WorkingDirectory $meetingRoot -WindowStyle Hidden }

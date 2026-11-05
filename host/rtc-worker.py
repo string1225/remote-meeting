@@ -137,6 +137,7 @@ class Devices:
         self.config, self.loop = config, loop
         self.force_keyframe = threading.Event()
         self.keyframe_at, self.target_bitrate = 0, VIDEO_BITRATE
+        self.video_ceiling = VIDEO_BITRATE
         self.target_fps = self.config['output']['fps']
         self.video, self.audio = Broadcast('video', loop, self.request_keyframe), Broadcast('audio', loop)
         self.camera_stop, self.audio_stop = threading.Event(), threading.Event()
@@ -240,7 +241,7 @@ class Devices:
                 elapsed = time.monotonic() - last
                 if elapsed >= 2:
                     produced, times = encoded[0], encode_times.copy()
-                    emit(type='metrics', fps=round((produced-last_encoded)/elapsed, 1), composeFps=round(count/elapsed, 1), encodeMs=round(sum(times)/max(1,len(times)), 1), renderMs=round(render_ms/count, 1), encoder=encoder, targetBitrate=self.target_bitrate, encodedKbps=round((encoded_bytes[0]-last_bytes)*8/elapsed/1000), largestFrameBytes=largest_frame[0])
+                    emit(type='metrics', fps=round((produced-last_encoded)/elapsed, 1), composeFps=round(count/elapsed, 1), encodeMs=round(sum(times)/max(1,len(times)), 1), renderMs=round(render_ms/count, 1), encoder=encoder, videoCeiling=self.video_ceiling, targetBitrate=self.target_bitrate, encodedKbps=round((encoded_bytes[0]-last_bytes)*8/elapsed/1000), largestFrameBytes=largest_frame[0])
                     last_bytes = encoded_bytes[0]; largest_frame[0] = 0
                     last, count, last_encoded, render_ms = time.monotonic(), 0, produced, 0
         except Exception as error:
@@ -340,10 +341,14 @@ async def main():
     config = json.loads(await asyncio.to_thread(sys.stdin.readline))
     cv2.setNumThreads(2)
     devices = Devices(config, asyncio.get_running_loop())
-    peers, tasks, device_lock = {}, set(), asyncio.Lock()
+    peers, remote_video, tasks, device_lock = {}, {}, set(), asyncio.Lock()
+    def budget(estimates=()):
+        devices.video_ceiling = video_budget(len(peers), remote_video=any(remote_video.get(id, True) for id in peers))
+        return video_budget(len(peers), estimates, any(remote_video.get(id, True) for id in peers))
     async def remove(id):
         peer = peers.pop(id, None)
-        devices.target_bitrate = video_budget(len(peers))
+        remote_video.pop(id, None)
+        devices.target_bitrate = budget()
         if peer:
             for sender in peer.getSenders():
                 if sender.track: sender.track.stop()
@@ -359,7 +364,7 @@ async def main():
                 # Gather separately, then let the negotiated BUNDLE consolidate it.
                 pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers(config), bundlePolicy=RTCBundlePolicy.BALANCED))
                 peers[id] = pc
-                devices.target_bitrate = video_budget(len(peers))
+                devices.target_bitrate = budget()
                 for source in [devices.video, devices.audio]:
                     t = pc.addTransceiver(Subscription(source), direction='sendonly')
                     if source.kind == 'video':
@@ -379,7 +384,10 @@ async def main():
             elif kind == 'peer-remove': await remove(id)
             elif kind == 'signal' and id in peers:
                 data = message['data']
-                if 'description' in data: await peers[id].setRemoteDescription(RTCSessionDescription(**data['description']))
+                if 'media' in data:
+                    remote_video[id] = data['media'].get('video') is not False
+                    devices.target_bitrate = budget()
+                elif 'description' in data: await peers[id].setRemoteDescription(RTCSessionDescription(**data['description']))
                 elif data.get('candidate'):
                     c = data['candidate']
                     candidate = candidate_from_sdp(c['candidate'].removeprefix('candidate:'))
@@ -430,7 +438,7 @@ async def main():
                     measured = getattr(sender, '_meeting_bandwidth', None)
                     if measured and time.monotonic() - measured[0] < 10: estimates.append(measured[1])
             previous_drops = {track: count for track, count in previous_drops.items() if track in active_tracks}
-            devices.target_bitrate = video_budget(len(peers), estimates)
+            devices.target_bitrate = budget(estimates)
             devices.target_fps = video_framerate(devices.config['output']['fps'], devices.target_fps, drops)
             await asyncio.sleep(2)
 

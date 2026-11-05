@@ -75,7 +75,7 @@ $('video-profile').onchange = async () => {
 $('host-microphone-toggle').onclick = () => void device('microphone', !current?.microphone);
 $('pause').onclick = () => send({ type: current?.paused ? 'bridge-resume' : 'bridge-pause' });
 $('retry-media').onclick = () => { for (const peer of [...rtc.peers.values()]) { rtc.remove(peer.info.id); rtc.add(peer.info); } };
-const timer = setInterval(() => { void rtc.stats(); if (current?.capturing && !$('camera-view').hidden) $('local-preview').src = '/api/preview?t=' + Date.now(); }, 1000);
+const timer = setInterval(() => { void rtc.stats().then(stats => { for (const { id, ...data } of stats) send({ type: 'return-media-stats', id, data }); }); if (current?.capturing && !$('camera-view').hidden) $('local-preview').src = '/api/preview?t=' + Date.now(); }, 1000);
 window.addEventListener('pagehide', () => { clearInterval(timer); clearTimeout(reconnectTimer); rtc.clear(); monitor.dispose(); const old = bridge; bridge = null; old?.close(); });
 window.hostDiagnostics = () => ({ ...current, localMedia: { video: false, audio: false }, rtc: [...rtc.peers.values()].map(p => ({ id: p.info.id, state: p.state, media: p.media })) });
 window.hostMediaStats = () => rtc.lastStats || [];
