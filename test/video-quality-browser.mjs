@@ -30,7 +30,7 @@ try {
     return s.virtualCamera.videoCeiling === 1500000 && s.virtualCamera.targetBitrate <= 1500000 && r?.width > 0 && r.width <= 1280 && r.height <= 720 && r?.receivedVideo > 10;
   });
   const audioTrack = await a.evaluate(() => window.testPeers.flatMap(pc => pc.getReceivers()).find(r => r.track.kind === 'audio').track.id);
-  for (const [profile, width, height, fps] of [['720p20', 1280, 720, 20], ['1080p10', 1920, 1080, 10], ['480p30', 854, 480, 30]]) {
+  for (const [profile, width, height, fps] of [['720p20', 1280, 720, 20], ['1080p10', 1920, 1080, 10], ['1080p30', 1920, 1080, 30], ['480p30', 854, 480, 30]]) {
     const audioBefore = await a.evaluate(() => window.meetingStats().find(p => p.receivedAudio)?.receivedAudio || 0);
     await stack.host.locator('#video-profile').selectOption(profile);
     await a.waitForFunction(profile => document.querySelector('#video-profile').value === profile, profile);

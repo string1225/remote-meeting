@@ -207,8 +207,8 @@ export function createHostService(config, { cameraFactory = createRtcWorker, hea
       activity();
       try {
         const message = JSON.parse(raw.toString());
-          if (message.type === 'joined') { clearTimeout(registrationTimer); attempt = 0; cloudWelcome = { self: message.self, iceServers: message.iceServers }; cloudConnection.lastRegisteredAt = new Date().toISOString(); cloudConnection.hostId = message.self.id; connectionState('registered'); virtual.configure?.(message.iceServers); updateRemotes(message.peers); mediaConfig(); }
-          else if (message.type === 'ice-config' && cloudWelcome) { cloudWelcome.iceServers = message.iceServers; virtual.configure?.(message.iceServers); mediaConfig(); }
+          if (message.type === 'joined') { clearTimeout(registrationTimer); attempt = 0; cloudWelcome = { self: message.self, iceServers: message.iceServers, hostMedia: message.hostMedia }; cloudConnection.lastRegisteredAt = new Date().toISOString(); cloudConnection.hostId = message.self.id; connectionState('registered'); virtual.configure?.(message.iceServers, message.hostMedia); updateRemotes(message.peers); mediaConfig(); }
+          else if (message.type === 'ice-config' && cloudWelcome) { cloudWelcome.iceServers = message.iceServers; cloudWelcome.hostMedia = message.hostMedia; virtual.configure?.(message.iceServers, message.hostMedia); mediaConfig(); }
         else if (message.type === 'peer-joined') { updateRemotes([...remotes.filter(p => p.id !== message.peer.id), message.peer]); send(renderer, message); }
         else if (message.type === 'peer-left') { updateRemotes(remotes.filter(p => p.id !== message.id)); send(renderer, message); }
         else if (message.type === 'control') command(message.data);

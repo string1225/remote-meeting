@@ -17,9 +17,13 @@ def capture_ntp(pts, time_base):
     return int((time.time() - age + 2208988800) * (1 << 32))
 
 
-def video_budget(peers, estimates=(), remote_video=True):
+def video_budget(peers, estimates=(), remote_video=True, bandwidth_mbps=None):
     # Unknown remote media keeps the duplex allowance until explicitly off.
     ceiling = SHARED_VIDEO_BITRATE if peers > 1 else SINGLE_VIDEO_BITRATE if remote_video else ONE_WAY_VIDEO_BITRATE
+    if bandwidth_mbps:
+        # Budget the shared FRP allowance across viewers, including RTP/UDP/IP
+        # overhead and Opus. Reverse media retains the existing TURN route.
+        ceiling = max(MIN_VIDEO_BITRATE, int(bandwidth_mbps * 1_000_000 * 0.72 / max(1, peers)))
     estimates = [int(value * 0.85) for value in estimates if value and 0 < value < ceiling]
     return max(MIN_VIDEO_BITRATE, min([ceiling, *estimates]))
 
@@ -29,7 +33,7 @@ def video_framerate(requested, current, drops):
 
 
 class TransportPacer:
-    def __init__(self, transport, bitrate, audio_ssrcs=()):
+    def __init__(self, transport, bitrate, audio_ssrcs=(), burst_seconds=0):
         self.transport, self.bitrate = transport, bitrate
         self.audio_ssrcs = set(audio_ssrcs)
         self.lock = asyncio.Lock()
@@ -37,6 +41,7 @@ class TransportPacer:
         self.configured = set()
         self.expired = set()
         self.dropped_frames = 0
+        self.burst_seconds = burst_seconds
 
     def buffers(self):
         # aiortc/aioice versions are pinned in rtc-requirements.txt. The public
@@ -84,14 +89,23 @@ class TransportPacer:
                 if stale(): return False
                 await asyncio.sleep(0.01)
             now = time.monotonic()
-            await asyncio.sleep(max(0, self.deadline - now))
+            if self.burst_seconds:
+                # Windows timers cannot reliably sleep for each ~1 ms RTP
+                # packet. Accumulate a small UDP burst and retain the virtual
+                # deadline across timer overshoot instead of slowing every
+                # packet down to the timer resolution.
+                self.deadline = max(self.deadline, now - self.burst_seconds)
+                delay = self.deadline - now
+                if delay > self.burst_seconds: await asyncio.sleep(delay)
+            else:
+                await asyncio.sleep(max(0, self.deadline - now))
             if stale(): return False
-            self.deadline = max(self.deadline, time.monotonic()) + len(data) * 8 / rate
+            self.deadline = (self.deadline if self.burst_seconds else max(self.deadline, time.monotonic())) + len(data) * 8 / rate
             await original(data)
             return True
 
 
-def pace_peer(pc, bitrate):
+def pace_peer(pc, bitrate, burst_seconds=0):
     pacers = []
     samples = {}
     captures = {}
@@ -100,7 +114,7 @@ def pace_peer(pc, bitrate):
     for transceiver in pc.getTransceivers():
         transport = transceiver.sender.transport
         if any(pacer.transport is transport for pacer in pacers): continue
-        pacer = TransportPacer(transport, bitrate, audio_ssrcs)
+        pacer = TransportPacer(transport, bitrate, audio_ssrcs, burst_seconds)
         original = transport._send_rtp
 
         async def send(data, original=original, pacer=pacer):

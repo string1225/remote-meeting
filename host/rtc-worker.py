@@ -14,9 +14,10 @@ import av
 import cv2
 import numpy as np
 from aiortc import RTCBundlePolicy, RTCConfiguration, RTCPeerConnection, RTCRtpSender, RTCSessionDescription, MediaStreamTrack
-from aiortc.sdp import candidate_from_sdp
+from aiortc.sdp import candidate_from_sdp, SessionDescription
 from audio_capture import Microphone, OpusPackets, microphones
 from relay import enforce_relay, ice_servers
+from udp_ice import UdpIceMux
 from rtc_flow import SINGLE_VIDEO_BITRATE, MAX_FRAME_AGE, video_budget, video_framerate, pace_peer, capture_ntp
 
 spec = importlib.util.spec_from_file_location('capture', pathlib.Path(__file__).with_name('virtual-camera.py'))
@@ -101,7 +102,7 @@ class Broadcast:
 def output_dimensions(width, height, settings):
     # Bound the actual primary source, including after a device/PIP swap. Keep
     # its aspect ratio and never enlarge a low-resolution source for encoding.
-    limit = (1920, 1080) if settings.get('profile') == '1080p10' else (1280, 720)
+    limit = (1920, 1080) if settings.get('profile') in ('1080p10', '1080p30') else (1280, 720)
     scale = min(1, limit[0] / width, limit[1] / height,
                 settings['width'] / width, settings['height'] / height)
     return tuple(max(2, min(int(source) // 2 * 2, int(bound) // 2 * 2, round(source * scale / 2) * 2))
@@ -342,10 +343,14 @@ async def main():
     cv2.setNumThreads(2)
     devices = Devices(config, asyncio.get_running_loop())
     peers, remote_video, tasks, device_lock = {}, {}, set(), asyncio.Lock()
+    udp_mux = None
+    udp_lock = asyncio.Lock()
     def budget(estimates=()):
-        devices.video_ceiling = video_budget(len(peers), remote_video=any(remote_video.get(id, True) for id in peers))
-        return video_budget(len(peers), estimates, any(remote_video.get(id, True) for id in peers))
+        bandwidth = (config.get('hostMedia') or {}).get('bandwidthMbps') if (config.get('hostMedia') or {}).get('transport') == 'udp' else None
+        devices.video_ceiling = video_budget(len(peers), remote_video=any(remote_video.get(id, True) for id in peers), bandwidth_mbps=bandwidth)
+        return video_budget(len(peers), estimates, any(remote_video.get(id, True) for id in peers), bandwidth_mbps=bandwidth)
     async def remove(id):
+        nonlocal udp_mux
         peer = peers.pop(id, None)
         remote_video.pop(id, None)
         devices.target_bitrate = budget()
@@ -355,6 +360,7 @@ async def main():
             await peer.close()
 
     async def handle(message):
+        nonlocal udp_mux
         kind, id = message.get('type'), message.get('id')
         try:
             if kind == 'peer-add':
@@ -362,7 +368,16 @@ async def main():
                 # aiortc 1.15 overwrites the primary media's ICE candidates when
                 # MAX_BUNDLE shares a transport before applying Chromium's answer.
                 # Gather separately, then let the negotiated BUNDLE consolidate it.
-                pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers(config), bundlePolicy=RTCBundlePolicy.BALANCED))
+                udp = (config.get('hostMedia') or {}).get('transport') == 'udp'
+                if udp:
+                    async with udp_lock:
+                        if udp_mux is None:
+                            media = config['hostMedia']
+                            mux = UdpIceMux(media['address'], media['port'])
+                            await mux.start(config.get('udpPort', 20000))
+                            udp_mux = mux
+                            emit(type='udp-listening', port=udp_mux.transport.get_extra_info('sockname')[1])
+                pc = RTCPeerConnection(RTCConfiguration(iceServers=[] if udp else ice_servers(config), bundlePolicy=RTCBundlePolicy.BALANCED))
                 peers[id] = pc
                 devices.target_bitrate = budget()
                 for source in [devices.video, devices.audio]:
@@ -370,25 +385,43 @@ async def main():
                     if source.kind == 'video':
                         t.setCodecPreferences([c for c in RTCRtpSender.getCapabilities('video').codecs if c.mimeType == 'video/H264'])
                         t.sender._send_keyframe = devices.request_keyframe
-                enforce_relay(pc)
-                pace_peer(pc, lambda: devices.target_bitrate)
+                if udp: udp_mux.configure(pc)
+                else: enforce_relay(pc)
+                pace_peer(pc, lambda: devices.target_bitrate, burst_seconds=0.008 if udp else 0)
                 @pc.on('connectionstatechange')
                 async def state():
                     emit(type='peer-state', id=id, state=pc.connectionState)
                 await pc.setLocalDescription(await pc.createOffer())
-                if not any(line.startswith('a=candidate:') and ' typ relay' in line for line in pc.localDescription.sdp.splitlines()):
+                if not udp and not any(line.startswith('a=candidate:') and ' typ relay' in line for line in pc.localDescription.sdp.splitlines()):
                     await remove(id)
                     raise RuntimeError('TURN relay unavailable; direct P2P is disabled')
                 if peers.get(id) is pc: emit(type='signal', to=id, channel='host-media', data={'description': {'type': pc.localDescription.type, 'sdp': pc.localDescription.sdp}})
-            elif kind == 'ice-config': config['iceServers'] = message.get('iceServers', [])
+            elif kind == 'ice-config':
+                if config.get('hostMedia') != message.get('hostMedia') and udp_mux and not peers:
+                    udp_mux.close()
+                    udp_mux = None
+                config['iceServers'] = message.get('iceServers', [])
+                config['hostMedia'] = message.get('hostMedia')
             elif kind == 'peer-remove': await remove(id)
             elif kind == 'signal' and id in peers:
                 data = message['data']
                 if 'media' in data:
                     remote_video[id] = data['media'].get('video') is not False
                     devices.target_bitrate = budget()
-                elif 'description' in data: await peers[id].setRemoteDescription(RTCSessionDescription(**data['description']))
-                elif data.get('candidate'):
+                elif 'description' in data:
+                    description = data['description']
+                    if (config.get('hostMedia') or {}).get('transport') == 'udp':
+                        # Let the browser check the public FRP endpoint. Learn
+                        # only its authenticated, forwarded source address:
+                        # probing browser candidates here could bypass FRP and
+                        # expose the native socket as a direct P2P candidate.
+                        answer = SessionDescription.parse(description['sdp'])
+                        for media in answer.media:
+                            media.ice_candidates = []
+                            media.ice_candidates_complete = False
+                        description = { **description, 'sdp': str(answer) }
+                    await peers[id].setRemoteDescription(RTCSessionDescription(**description))
+                elif data.get('candidate') and (config.get('hostMedia') or {}).get('transport') != 'udp':
                     c = data['candidate']
                     candidate = candidate_from_sdp(c['candidate'].removeprefix('candidate:'))
                     candidate.sdpMid, candidate.sdpMLineIndex = c.get('sdpMid'), c.get('sdpMLineIndex')
@@ -440,6 +473,7 @@ async def main():
             previous_drops = {track: count for track, count in previous_drops.items() if track in active_tracks}
             devices.target_bitrate = budget(estimates)
             devices.target_fps = video_framerate(devices.config['output']['fps'], devices.target_fps, drops)
+            if config.get('diagnostics'): emit(type='network-metrics', targetFps=devices.target_fps, dropped=drops, totalDropped=sum(track.dropped for track in active_tracks), queued=sum(track.queue.qsize() for track in active_tracks))
             await asyncio.sleep(2)
 
     task = asyncio.create_task(feedback()); tasks.add(task); task.add_done_callback(tasks.discard)
@@ -455,6 +489,7 @@ async def main():
         await asyncio.gather(*tasks, return_exceptions=True)
         await devices.camera_close(); await devices.microphone_close()
         await asyncio.gather(*(remove(id) for id in list(peers)))
+        if udp_mux: udp_mux.close()
 
 if __name__ == '__main__':
     asyncio.run(main())

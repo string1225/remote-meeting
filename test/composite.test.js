@@ -24,6 +24,6 @@ test('main covers the canvas without stretching; PIP stays inside the lower righ
   }
 });
 
-test('explicit profiles offer the three frame-rate and resolution tradeoffs', () => {
-  for (const [profile, width, height, fps] of [['480p30', 854, 480, 30], ['720p20', 1280, 720, 20], ['1080p10', 1920, 1080, 10]]) assert.deepEqual(compositeSettings({ profile }), { width, height, fps, profile });
+test('explicit profiles include 1080p30 while legacy settings keep their cap', () => {
+  for (const [profile, width, height, fps] of [['480p30', 854, 480, 30], ['720p20', 1280, 720, 20], ['1080p10', 1920, 1080, 10], ['1080p30', 1920, 1080, 30]]) assert.deepEqual(compositeSettings({ profile }), { width, height, fps, profile });
 });

@@ -5,12 +5,12 @@ export class MeetingRTC {
   constructor({ send, stream = new MediaStream(), channel, initiate = false, receive = true, onTrack, onPeer, onRemove, onError = () => {} }) {
     Object.assign(this, { send, stream, channel, initiate, receive, onTrack, onPeer, onRemove, onError }); this.peers = new Map();
   }
-  configure(self, iceServers = []) { if (self.id !== this.self?.id) this.clear(); this.self = self; this.iceServers = iceServers; }
+  configure(self, iceServers = [], hostMedia) { if (self.id !== this.self?.id) this.clear(); this.self = self; this.iceServers = iceServers; this.udp = this.channel === 'host-media' && hostMedia?.transport === 'udp'; }
   add(info) {
     if (!this.self || info.id === this.self.id || info.role === this.self.role) return;
     if (this.peers.has(info.id)) return this.peers.get(info.id);
-    if (!this.iceServers?.some(server => (Array.isArray(server.urls) ? server.urls : [server.urls]).some(url => /^turns?:/.test(url)) && server.username && server.credential)) throw new Error('缺少服务器转发配置，请检查 TURN 服务');
-    const pc = new RTCPeerConnection({ iceServers: this.iceServers, iceTransportPolicy: 'relay', bundlePolicy: 'max-bundle' });
+    if (!this.udp && !this.iceServers?.some(server => (Array.isArray(server.urls) ? server.urls : [server.urls]).some(url => /^turns?:/.test(url)) && server.username && server.credential)) throw new Error('缺少服务器转发配置，请检查 TURN 服务');
+    const pc = new RTCPeerConnection({ iceServers: this.udp ? [] : this.iceServers, iceTransportPolicy: this.udp ? 'all' : 'relay', bundlePolicy: 'max-bundle' });
     const peer = { info, pc, state: 'connecting', media: { audio: false, video: false }, candidates: [], queue: Promise.resolve(), senders: {}, snapshot: {} }; this.peers.set(info.id, peer);
     const signal = data => this.send({ type: 'signal', to: info.id, channel: this.channel, data }); peer.signal = signal;
     pc.onicecandidate = ({ candidate }) => { if (candidate) signal({ candidate: candidate.toJSON() }); };
@@ -85,7 +85,7 @@ export class MeetingRTC {
         }
         const local = pair && reports.get(pair.localCandidateId), remote = pair && reports.get(pair.remoteCandidateId);
         const relay = local?.candidateType === 'relay' || remote?.candidateType === 'relay';
-        peer.link = pair ? relay ? '服务器转发' : '异常：未使用转发' : ''; this.onPeer?.(peer);
+        peer.link = pair ? this.udp ? 'UDP 转发' : relay ? '服务器转发' : '异常：未使用转发' : ''; this.onPeer?.(peer);
         const now = performance.now(), previous = peer.snapshot.metrics;
         const elapsed = previous ? (now - previous.now) / 1000 : 0;
         const diff = key => Math.max(0, (video?.[key] || 0) - (previous?.video?.[key] || 0));
@@ -104,7 +104,7 @@ export class MeetingRTC {
         };
         peer.snapshot.metrics = { now, video, bytes, rtpTimestamp: sync?.rtpTimestamp, arrivalLagMs };
         if (this.channel === 'host-media' && this.receive && video) this.send({ type: 'media-stats', data: metrics });
-        output.push({ id: peer.info.id, state: peer.pc.connectionState, transport: pair ? relay ? 'relay' : 'p2p' : 'connecting', localCandidate: local?.candidateType, remoteCandidate: remote?.candidateType, relayProtocol: local?.relayProtocol, receivedAudio, receivedVideo, receivedBytes: bytes, rtt: pair?.currentRoundTripTime, ...metrics });
+        output.push({ id: peer.info.id, state: peer.pc.connectionState, transport: pair ? this.udp ? 'frp-udp' : relay ? 'relay' : 'p2p' : 'connecting', localCandidate: local?.candidateType, remoteCandidate: remote?.candidateType, remoteAddress: remote?.address, remotePort: remote?.port, relayProtocol: local?.relayProtocol, receivedAudio, receivedVideo, receivedBytes: bytes, rtt: pair?.currentRoundTripTime, ...metrics });
       } catch { /* The connection may close during collection. */ }
     }
     this.lastStats = output; return output;

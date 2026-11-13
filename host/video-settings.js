@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { videoProfiles } from './composite.js';
 
 export function validateVideoProfile(profile) {
-  if (typeof profile !== 'string' || !Object.hasOwn(videoProfiles, profile)) throw new Error('请选择 480p/30帧、720p/20帧或1080p/10帧');
+  if (typeof profile !== 'string' || !Object.hasOwn(videoProfiles, profile)) throw new Error('请选择 480p/30帧、720p/20帧、1080p/10帧或1080p/30帧');
   return profile;
 }
 export function createVideoSettings(file, fallback = '720p20') {

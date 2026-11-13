@@ -96,7 +96,7 @@ function openSocket() {
     const message = JSON.parse(event.data);
     if (message.type === 'joined') {
       connected = true; retry = 0; peers = [message.self, ...message.peers]; renderPeers();
-      self = message.self; rtc.configure(self, message.iceServers); sender.configure(self, message.iceServers);
+      self = message.self; rtc.configure(self, message.iceServers, message.hostMedia); sender.configure(self, message.iceServers);
       for (const peer of message.peers) { rtc.add(peer); sender.add(peer); }
       $('signal-status').textContent = '● 已接入现场';
       hostStatus(message.hostState);

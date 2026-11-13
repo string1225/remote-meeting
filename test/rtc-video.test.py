@@ -41,8 +41,9 @@ class RtcVideoTests(unittest.TestCase):
             self.assertTrue(decoded)
             self.assertEqual((decoded[0].width, decoded[0].height), (width, height))
 
-    def test_1080p_requires_explicit_low_framerate_profile(self):
+    def test_1080p_requires_explicit_profile(self):
         self.assertEqual(worker.output_dimensions(1920, 1080, dict(width=1920, height=1080, fps=10, profile='1080p10')), (1920, 1080))
+        self.assertEqual(worker.output_dimensions(1920, 1080, dict(width=1920, height=1080, fps=30, profile='1080p30')), (1920, 1080))
         self.assertEqual(worker.output_dimensions(1920, 1080, dict(width=854, height=480, fps=30, profile='480p30')), (854, 480))
 
 
@@ -77,6 +78,9 @@ class RtcFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(video_budget(2), 900000)
         self.assertEqual(video_budget(2, [400000]), 340000)
         self.assertEqual(video_budget(1, [100000]), 250000)
+        self.assertEqual(video_budget(1, bandwidth_mbps=10), 7200000)
+        self.assertEqual(video_budget(2, bandwidth_mbps=10), 3600000)
+        self.assertEqual(video_budget(1, [2000000], bandwidth_mbps=10), 1700000)
         self.assertEqual(video_framerate(30, 30, 2), 22)
         self.assertEqual(video_framerate(30, 22, 0), 23)
         self.assertEqual(video_framerate(10, 10, 0), 10)

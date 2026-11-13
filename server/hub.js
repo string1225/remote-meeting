@@ -3,7 +3,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { authenticateAgent } from './agent-auth.js';
 import { normalizeView } from '../host/crop.js';
 import { compositeSettings, videoProfiles } from '../host/composite.js';
-import { isRelayCandidate, relaySdp } from './relay.js';
+import { mediaCandidate, mediaSdp } from './relay.js';
 
 const error = (status, message) => Object.assign(new Error(message), { status });
 const describe = p => ({ id: p.id, role: p.role, name: p.name });
@@ -105,15 +105,16 @@ export function createHub(server, { hostKey, sessionFor, originAllowed, rate, ad
           const target = [host, ...connected()].find(p => p?.id === msg.to);
           if (!target || target.role === peer.role || !['host-media', 'remote-media'].includes(msg.channel)) return;
           const data = msg.data; if (!data || typeof data !== 'object') return;
+          const hostMedia = msg.channel === 'host-media' ? relayConfig().hostMedia : undefined;
           let clean;
           if (data.description) {
             const d = data.description;
             if (d.type !== (agent ? 'offer' : 'answer') || typeof d.sdp !== 'string' || d.sdp.length > 48000) return fail('INVALID', '无效的媒体协商');
-            clean = { description: { type: d.type, sdp: relaySdp(d.sdp) } };
+            clean = { description: { type: d.type, sdp: mediaSdp(d.sdp, hostMedia, agent) } };
           } else if (data.candidate) {
             const c = data.candidate;
             if (typeof c.candidate !== 'string' || c.candidate.length > 2048 || typeof c.sdpMid !== 'string' && c.sdpMid !== null || !Number.isInteger(c.sdpMLineIndex) || c.sdpMLineIndex < 0 || c.sdpMLineIndex > 10) return fail('INVALID', '无效的连接地址');
-            if (!isRelayCandidate(c.candidate)) return;
+            if (!mediaCandidate(c.candidate, hostMedia, agent)) return;
             clean = { candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex } };
           } else if (data.media && msg.channel === 'remote-media' && !agent) clean = { media: { audio: data.media.audio === true, video: data.media.video === true } };
           else if (data.restart === true && !agent) clean = { restart: true };

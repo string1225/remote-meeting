@@ -5,7 +5,7 @@ import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 
 export function createRtcWorker(config, publish) {
-  let child, preview, stopping, iceServers = [], settings = config.output;
+  let child, preview, stopping, iceServers = [], hostMedia, settings = config.output;
   const peers = new Set();
   const requests = new Map();
   function ensure() {
@@ -13,7 +13,7 @@ export function createRtcWorker(config, publish) {
     const process = spawn(config.pythonPath || resolve('.local/virtual-camera/Scripts/python.exe'), ['-u', fileURLToPath(new URL('./rtc-worker.py', import.meta.url))], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     child = process; let diagnostics = '';
     process.stdin.on('error', () => {});
-    process.stdin.write(JSON.stringify({ ...config, output: settings, iceServers }) + '\n');
+    process.stdin.write(JSON.stringify({ ...config, output: settings, iceServers, hostMedia }) + '\n');
     createInterface({ input: process.stdout }).on('line', line => {
       if (child !== process) return;
       try {
@@ -31,7 +31,7 @@ export function createRtcWorker(config, publish) {
   function send(data) { ensure(); if (child?.stdin.writable) child.stdin.write(JSON.stringify(data) + '\n'); }
   function request(type, data = {}) { const requestId = randomUUID(); return new Promise((resolve, reject) => { requests.set(requestId, { resolve, reject, timer: setTimeout(() => { requests.delete(requestId); reject(new Error('本机设备操作超时，请重试')); }, 30000) }); send({ type, requestId, ...data }); }); }
   return {
-    configure(servers) { iceServers = servers || []; if (child) send({ type: 'ice-config', iceServers }); },
+    configure(servers, media) { iceServers = servers || []; hostMedia = media; if (child) send({ type: 'ice-config', iceServers, hostMedia }); },
     async listDevices() { return (await request('devices-list')).devices; },
     async applyDevices(next) { Object.assign(config, next); if (child) await request('devices-config', { config: next }); },
     async applyVideo(output) { settings = output; if (child) await request('video-config', { output }); },

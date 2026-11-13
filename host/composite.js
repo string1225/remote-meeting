@@ -3,7 +3,8 @@ import { cropRect, normalizeView } from './crop.js';
 export const videoProfiles = Object.freeze({
   '480p30': { width: 854, height: 480, fps: 30 },
   '720p20': { width: 1280, height: 720, fps: 20 },
-  '1080p10': { width: 1920, height: 1080, fps: 10 }
+  '1080p10': { width: 1920, height: 1080, fps: 10 },
+  '1080p30': { width: 1920, height: 1080, fps: 30 }
 });
 
 export function compositeSettings(output = {}) {
