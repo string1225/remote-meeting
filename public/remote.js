@@ -4,6 +4,7 @@ import { MeetingRTC, remoteVideoConstraints } from './rtc.js';
 import { LocalMedia, pageFullscreen, preview, remotePlayers } from './media.js';
 import { createAudioMonitor } from './audio-meter.js';
 import { createPlaybackControls } from './playback-controls.js';
+import { initWakeControls } from './wol.js';
 const $ = id => document.getElementById(id), base = new URL('./', location.href);
 let socket, ticket, connected = false, wantConnect = false, joining = false, reconnectTimer, requestTimer, messageTimer, retry = 0, state = 'offline', peers = [];
 const storageKey = 'camera-control-ticket';
@@ -13,6 +14,7 @@ function notify(text, error = false) {
   messageTimer = setTimeout(() => { $('message').hidden = true; }, error ? 12000 : 5000);
 }
 const accounts = initAccounts(notify);
+initWakeControls(accounts, notify);
 const micConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
 const monitor = createAudioMonitor({ container: $('remote-audio-monitor'), onError: message => notify(message, true), requestMicrophone: () => navigator.mediaDevices.getUserMedia({ audio: micConstraints, video: false }) });
 const playback = createPlaybackControls({ button: $('play-audio'), container: $('remote-audio'), activate: monitor.activate, onError: message => notify(message, true) });

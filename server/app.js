@@ -5,14 +5,19 @@ import { createHub } from './hub.js';
 import { createUserStore } from './users.js';
 import { authenticateAgent } from './agent-auth.js';
 import { createRelayConfig } from './relay.js';
+import { createWakeBroker } from './wol.js';
 
 const token = () => randomBytes(24).toString('base64url');
 const split = value => (value || '').split(',').map(v => v.trim()).filter(Boolean);
 const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/remote.js', ['remote.js', 'text/javascript']], ['/accounts.js', ['accounts.js', 'text/javascript']], ['/crop-controls.js', ['crop-controls.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']], ['/control.css', ['control.css', 'text/css']]]);
 for (const [path, type] of [['rtc.js', 'text/javascript'], ['media.js', 'text/javascript'], ['meeting.css', 'text/css'], ['audio-meter.js', 'text/javascript'], ['audio-meter.css', 'text/css'], ['playback-controls.js', 'text/javascript']]) assets.set('/' + path, [path, type]);
+assets.set('/wol.js', ['wol.js', 'text/javascript']);
+assets.set('/wol.css', ['wol.css', 'text/css']);
 
 export function createMeetingServer(options = {}) {
   const env = { ...process.env, ...options };
+  if (env.WOL_AGENT_KEY && (typeof env.WOL_AGENT_KEY !== 'string' || env.WOL_AGENT_KEY.length < 32 || env.WOL_AGENT_KEY.startsWith('replace-') || env.WOL_AGENT_KEY === env.HOST_AGENT_KEY)) throw new Error('WOL_AGENT_KEY must be a separate random key of at least 32 characters');
+  const wake = createWakeBroker({ enabled: !!env.WOL_AGENT_KEY });
   const relayConfig = createRelayConfig(env);
   const users = createUserStore({ file: env.USERS_FILE, bootstrapPassword: env.BOOTSTRAP_ADMIN_PASSWORD || env.ADMIN_KEY, bootstrapUsername: env.BOOTSTRAP_ADMIN_USERNAME || 'admin' });
   const sessions = new Map();
@@ -72,6 +77,12 @@ export function createMeetingServer(options = {}) {
     try {
       const path = new URL(req.url, 'http://localhost').pathname;
       if (req.method === 'GET' && path === '/api/health') return json(res, 200, { status: 'ok', mode: 'web-meeting', transport: 'relay' });
+      if (path === '/api/wol/agent/poll') {
+        if (!env.WOL_AGENT_KEY || req.headers.origin || !authenticateAgent(req.headers.authorization, env.WOL_AGENT_KEY)) return json(res, 401, { error: 'NAS 认证失败' });
+        if (req.method !== 'POST') return json(res, 405, { error: '不支持的操作' });
+        if (!rate('wol-agent', 120)) return json(res, 429, { error: 'NAS 请求过于频繁' });
+        wake.poll(await body(req), res, json); return;
+      }
       if (path === '/api/agent/status') {
         if (req.headers.origin || !authenticateAgent(req.headers.authorization, env.HOST_AGENT_KEY)) return json(res, 401, { error: '主机认证失败' });
         if (req.method !== 'GET') return json(res, 405, { error: '不支持的操作' });
@@ -121,6 +132,17 @@ export function createMeetingServer(options = {}) {
         res.setHeader('Set-Cookie', cookie(req, '', 0));
         return json(res, 200, { ok: true });
       }
+      if (path === '/api/wol' || path.startsWith('/api/wol/')) {
+        const session = sessionFor(req);
+        if (!session) return json(res, 401, { error: '请先登录' });
+        if (req.method === 'GET' && path === '/api/wol') return json(res, 200, wake.status());
+        const target = /^\/api\/wol\/([^/]+)\/wake$/.exec(path)?.[1];
+        if (req.method !== 'POST' || !target) return json(res, 404, { error: '不支持的操作' });
+        if (!rate('wol-user:' + session.user.id, 10)) return json(res, 429, { error: '唤醒操作过于频繁，请稍后重试' });
+        const result = await wake.wake(target);
+        console.info(`Wake packet confirmed: target=${target} user=${session.user.id}`);
+        return json(res, 200, result);
+      }
       if (path === '/api/users' || path.startsWith('/api/users/')) {
         const session = sessionFor(req);
         if (!session) return json(res, 401, { error: '请先登录' });
@@ -167,6 +189,6 @@ export function createMeetingServer(options = {}) {
     for (const [key, entry] of limits) if (entry.until < Date.now()) limits.delete(key);
   }, 30000);
   cleanup.unref();
-  server.shutdown = () => new Promise(resolve => { clearInterval(cleanup); hub.shutdown(); server.close(resolve); });
+  server.shutdown = () => new Promise(resolve => { clearInterval(cleanup); wake.shutdown(); hub.shutdown(); server.close(resolve); });
   return server;
 }
