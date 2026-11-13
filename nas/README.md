@@ -13,9 +13,9 @@ NAS 不监听端口，不需要公网 IP、路由器端口转发或 NAS 管理�
 
 ## 导入与运行
 
-提供的 `remote-meeting-wol-amd64.tar.gz` 是 Docker **镜像**归档，等同于 `docker save` 后压缩，不能当作容器文件系统导入。
-在 Container Station 的“镜像 / Images → 导入”选择这个文件，然后从 `remote-meeting-wol:1.0.0` 创建容器。
-如果当前界面的“导入容器”只接受 `docker export` 格式，请切换到“镜像”导入；格式扩展名相同但内容不同。
+推荐使用 `meeting-wol-qnap-docker20.tar`：由 Docker 20.10 原生导出的未压缩**镜像**归档，保留 NAS 导入检查使用的 `repositories`、每层 `json` 与 `VERSION`，同时含现代 `manifest.json`。
+在 Container Station 的“镜像 / Images → 导入”选择这个文件，然后从 `remote-meeting-wol:1.0.0` 创建容器；它不包含容器运行配置，不能用来恢复容器。
+旧版 `remote-meeting-wol-amd64.tar.gz` 虽可由 Docker 加载，但缺少部分旧格式元数据，可能被 Container Station 的预检查拒绝，请改用兼容版 `.tar`。
 
 创建容器设置：
 
@@ -27,7 +27,7 @@ NAS 不监听端口，不需要公网 IP、路由器端口转发或 NAS 管理�
 通过 SSH 管理 NAS 的等效操作（先上传镜像和配置，不在终端中粘贴密钥）：
 
 ```sh
-docker load -i remote-meeting-wol-amd64.tar.gz
+docker load -i meeting-wol-qnap-docker20.tar
 chmod 600 .env
 docker compose -f compose.yaml up -d
 docker logs --tail 30 meeting-wol
@@ -54,10 +54,10 @@ USB 网卡需要该网卡、USB 待机供电及电脑固件共同支持；很多
 
 ```sh
 docker build --platform linux/amd64 -t remote-meeting-wol:1.0.0 nas
-docker save remote-meeting-wol:1.0.0 | gzip > remote-meeting-wol-amd64.tar.gz
+docker save --output meeting-wol-qnap-docker20.tar remote-meeting-wol:1.0.0
 ```
 
-没有 Docker 的工作站也可运行 `python nas/build-image.py --output /绝对路径/remote-meeting-wol-amd64.tar.gz`。
+没有 Docker 的工作站也可运行 `python nas/build-image.py --output /绝对路径/meeting-wol-compatible.tar`；脚本生成含完整旧格式元数据的 USTAR 镜像归档，输出 `.tar.gz` 或 `.tgz` 时才启用 gzip 压缩。
 构建脚本从 Docker 官方 Python 镜像下载 amd64 层，逐层校验压缩及解压 SHA-256，再生成 Docker load 归档和校验清单。Docker Hub 连接受限时，加上 `--registry ecr` 使用 Docker 官方镜像的 Amazon ECR 公共镜像源。
 清单记录不可变的基础 manifest digest；重建时可用 `--base sha256:...` 固定它。
 镜像中没有 NAS 凭据；`.env`、`container-settings.txt` 不能提交到 Git 或公开下载。
