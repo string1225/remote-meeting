@@ -24,7 +24,7 @@ try {
     return { source: sender.track.getSettings(), encoding: sender.getParameters().encodings[0] };
   });
   assert.equal(reverse.source.width, 1920); assert.equal(reverse.source.height, 1080);
-  assert.equal(reverse.encoding.scaleResolutionDownBy, 1.5); assert.equal(reverse.encoding.maxBitrate, 800000);
+  assert.equal(reverse.encoding.scaleResolutionDownBy, 1.5); assert.equal(reverse.encoding.maxBitrate, 2000000);
   await stack.host.waitForFunction(() => {
     const s = hostDiagnostics(), r = s.peers[0]?.returnReceiver;
     return s.virtualCamera.videoCeiling === 1500000 && s.virtualCamera.targetBitrate <= 1500000 && r?.width > 0 && r.width <= 1280 && r.height <= 720 && r?.receivedVideo > 10;
@@ -47,10 +47,12 @@ try {
   assert.equal(stack.local.hostStatus().microphone, true);
   await a.locator('#camera-toggle').click();
   await stack.host.waitForFunction(() => hostDiagnostics().peers[0]?.media?.video === true && hostDiagnostics().virtualCamera.videoCeiling === 1500000);
-  await a.locator('#leave').click(); await a.locator('#join-button').click(); await startCameras(a);
+  await a.locator('#leave').click(); await a.locator('#join-button').click();
+  await a.waitForFunction(() => document.querySelector('#host-camera-toggle').textContent === '启动摄像头' && !document.querySelector('#host-camera-toggle').disabled);
+  await startCameras(a);
   await stack.host.waitForFunction(() => hostDiagnostics().peers[0]?.media?.video === false && hostDiagnostics().virtualCamera.videoCeiling === 2200000);
   assert.deepEqual(stack.errors, []);
-  console.log('PASS: single-viewer duplex TURN, actual 1080p source encoded within 720p/800 kbps ceilings, live 1.5/2.2 Mbps allocation on camera toggles and rejoin, and profile changes preserve audio.');
+  console.log('PASS: single-viewer duplex TURN, actual 1080p source encoded within 720p/2 Mbps ceilings, live 1.5/2.2 Mbps allocation on camera toggles and rejoin, and profile changes preserve audio.');
 } catch (error) {
   console.error(JSON.stringify({ qualityFailure: stack.local.hostStatus() }));
   throw error;

@@ -1,6 +1,6 @@
 // The native backend sends host-media; the local page only receives remote-media.
 export const remoteVideoConstraints = { facingMode: 'user', width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 15, max: 20 } };
-export const remoteVideoBitrate = 800000;
+export const remoteVideoBitrate = 2000000;
 export class MeetingRTC {
   constructor({ send, stream = new MediaStream(), channel, initiate = false, receive = true, onTrack, onPeer, onRemove, onError = () => {} }) {
     Object.assign(this, { send, stream, channel, initiate, receive, onTrack, onPeer, onRemove, onError }); this.peers = new Map();
