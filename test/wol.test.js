@@ -78,6 +78,42 @@ test('unconfigured service never authenticates a missing NAS key', async t => {
   assert.equal((await f.api('wol/basement/wake', { method: 'POST', cookie: f.cookie })).status, 503);
 });
 
+test('fresh checks cover both IPs, share one NAS probe, and preserve WOL permissions', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.api('wol/check', { method: 'POST' })).status, 401);
+  assert.equal((await f.api('wol/check', { method: 'POST', cookie: f.cookie, origin: 'https://attacker.example' })).status, 403);
+  assert.equal((await f.api('wol/check', { method: 'POST', cookie: f.cookie })).status, 503);
+  const poll = f.poll({ configured: ['basement'], capabilities: ['status'] });
+  await until(async () => (await (await f.api('wol', { cookie: f.cookie })).json()).canCheck);
+  const check = () => f.api('wol/check', { method: 'POST', cookie: f.cookie });
+  const a = check(), b = check();
+  const { command } = await (await poll).json();
+  assert.equal(command.type, 'check'); assert.equal(command.target, undefined);
+  await until(async () => (await (await f.api('wol', { cookie: f.cookie })).json()).checking);
+  const invalid = await f.poll({ configured: ['basement'], capabilities: ['status'], result: { id: command.id, ok: true, states: { 'small-room': 'online', basement: 'shutdown' } } });
+  assert.equal(invalid.status, 400);
+  const receipt = f.poll({ configured: ['basement'], capabilities: ['status'], result: { id: command.id, ok: true, states: { 'small-room': 'online', basement: 'unreachable' } } });
+  const states = await Promise.all([a, b].map(async request => { const response = await request; assert.equal(response.status, 200); return response.json(); }));
+  assert.equal(states[0].targets[0].powerState, 'online');
+  assert.equal(states[0].targets[0].configured, false);
+  assert.equal(states[0].targets[1].powerState, 'unreachable');
+  assert.ok(states[0].targets.every(target => target.checkedAt > Date.now() - 1000));
+  assert.equal(states[1].targets[0].checkedAt, states[0].targets[0].checkedAt);
+  assert.equal((await f.api('wol/small-room/wake', { method: 'POST', cookie: f.cookie })).status, 409);
+  t.after(async () => { assert.equal((await (await receipt).json()).command, null); });
+});
+
+test('older NAS agents keep WOL and receive an explicit status upgrade requirement', async t => {
+  const f = await fixture(t);
+  const poll = f.poll();
+  await until(async () => (await (await f.api('wol', { cookie: f.cookie })).json()).online);
+  const response = await f.api('wol/check', { method: 'POST', cookie: f.cookie });
+  assert.equal(response.status, 409); assert.match((await response.json()).error, /1\.1\.0/);
+  const state = await (await f.api('wol', { cookie: f.cookie })).json();
+  assert.equal(state.canCheck, false); assert.equal(state.targets[0].powerState, 'unknown');
+  t.after(async () => { assert.equal((await (await poll).json()).command, null); });
+});
+
 function brokerPoll(broker, input) {
   let resolve;
   const response = new Promise(done => { resolve = done; });
@@ -103,5 +139,30 @@ test('commands expire without replay; failure receipts and stale NAS are honest'
     await new Promise(resolve => setTimeout(resolve, 110));
     assert.equal(broker.status().online, false);
     assert.throws(() => broker.wake('basement'), error => error.status === 503);
+  } finally { broker.shutdown(); }
+});
+
+test('computer status expires and is never reported as current when the NAS goes offline', async () => {
+  const broker = createWakeBroker({ enabled: true, pollMs: 5, statusMs: 20, onlineMs: 80 });
+  try {
+    const poll = brokerPoll(broker, { configured: [], capabilities: ['status'] });
+    const check = broker.check();
+    const { command } = await poll;
+    const receipt = brokerPoll(broker, { configured: [], capabilities: ['status'], result: { id: command.id, ok: true, states: { 'small-room': 'online', basement: 'online' } } });
+    assert.equal((await check).targets[0].powerState, 'online');
+    await receipt;
+    const nextPoll = brokerPoll(broker, { configured: [], capabilities: ['status'] });
+    const nextCheck = broker.check();
+    const nextCommand = (await nextPoll).command;
+    const failed = assert.rejects(nextCheck, error => error.status === 502);
+    await brokerPoll(broker, { configured: [], capabilities: ['status'], result: { id: nextCommand.id, ok: false } });
+    await failed;
+    assert.equal(broker.status().targets[0].powerState, 'unknown');
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(broker.status().targets[0].stale, true);
+    assert.equal(broker.status().targets[0].powerState, 'unknown');
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(broker.status().online, false);
+    assert.ok(broker.status().targets[0].checkedAt);
   } finally { broker.shutdown(); }
 });

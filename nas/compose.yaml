@@ -1,6 +1,6 @@
 services:
   meeting-wol:
-    image: remote-meeting-wol:1.0.0
+    image: remote-meeting-wol:1.1.0
     container_name: meeting-wol
     network_mode: host
     restart: unless-stopped

@@ -1,9 +1,12 @@
 """Outbound HTTPS WOL agent; no listening ports or third-party dependencies."""
 import json
+from concurrent.futures import ThreadPoolExecutor
+import errno
 import math
 import os
 import re
 import socket
+import struct
 import sys
 import time
 import uuid
@@ -12,6 +15,45 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 TARGET_ENV = {"small-room": "WOL_SMALL_ROOM_MAC", "basement": "WOL_BASEMENT_MAC"}
+TARGET_IPS = {"small-room": "192.168.31.150", "basement": "192.168.31.100"}
+
+
+def ping_host(ip, timeout=0.8):
+    """Unprivileged Linux ICMP; TCP checks still work if QNAP disallows it."""
+    payload = os.urandom(16)
+    packet = struct.pack("!BBHHH", 8, 0, 0, 0, 1) + payload
+    total = sum(struct.unpack("!" + "H" * (len(packet) // 2), packet))
+    total = (total & 0xffff) + (total >> 16)
+    total = (total & 0xffff) + (total >> 16)
+    packet = packet[:2] + struct.pack("!H", (~total) & 0xffff) + packet[4:]
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_ICMP) as probe:
+        probe.settimeout(timeout)
+        probe.sendto(packet, (ip, 0))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            probe.settimeout(max(0.001, deadline - time.monotonic()))
+            reply, address = probe.recvfrom(1024)
+            if address[0] == ip and len(reply) >= 8 and reply[0] == 0 and reply[8:] == payload:
+                return True
+    return False
+
+
+def probe_host(ip):
+    try:
+        if ping_host(ip):
+            return "online"
+    except OSError:
+        pass
+    # A refused TCP connection is also a live response from the computer.
+    # Timeouts mean unresponsive, not proof that Windows has shut down.
+    for port in (445, 135, 3389):
+        try:
+            with socket.create_connection((ip, port), timeout=0.6):
+                return "online"
+        except OSError as error:
+            if error.errno == errno.ECONNREFUSED or getattr(error, "winerror", None) == 10061:
+                return "online"
+    return "unreachable"
 
 
 def normalize_mac(value):
@@ -45,7 +87,7 @@ class NoRedirects(HTTPRedirectHandler):
 
 
 class Agent:
-    def __init__(self, env=None, sender=send_wake):
+    def __init__(self, env=None, sender=send_wake, prober=probe_host):
         env = os.environ if env is None else env
         url = env.get("MEETING_URL", "https://home.sunny-string.cn/meeting/")
         parsed = urlparse(url)
@@ -69,6 +111,7 @@ class Agent:
         if self.broadcast not in ("192.168.31.255", "255.255.255.255"):
             raise ValueError("WOL_BROADCAST must be a broadcast address for this home LAN")
         self.sender = sender
+        self.prober = prober
         self.seen = {}
         self.opener = build_opener(NoRedirects())
 
@@ -84,7 +127,20 @@ class Agent:
         target, expires = command.get("target"), command.get("expiresAt")
         valid_time = type(expires) in (float, int) and math.isfinite(expires) and now < expires <= now + 30000
         result = {"id": identity, "ok": False}
-        if isinstance(target, str) and target in self.targets and valid_time:
+        command_type = command.get("type", "wake")
+        if command_type == "check" and target is None and valid_time:
+            def inspect(item):
+                name, ip = item
+                try:
+                    state = self.prober(ip)
+                except OSError:
+                    state = "unknown"
+                return name, state if state in ("online", "unreachable", "unknown") else "unknown"
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                result["states"] = dict(pool.map(inspect, TARGET_IPS.items()))
+            result["ok"] = True
+            print("Computer status check complete", flush=True)
+        elif command_type == "wake" and isinstance(target, str) and target in self.targets and valid_time:
             try:
                 self.sender(self.targets[target], self.broadcast)
                 result["ok"] = True
@@ -100,11 +156,11 @@ class Agent:
         return result
 
     def poll(self, result=None):
-        payload = {"configured": list(self.targets)}
+        payload = {"configured": list(self.targets), "capabilities": ["status"]}
         if result is not None:
             payload["result"] = result
         request = Request(self.url, data=json.dumps(payload).encode("utf-8"), method="POST", headers={
-            "Authorization": "Bearer " + self.key, "Content-Type": "application/json", "User-Agent": "remote-meeting-wol/1.0",
+            "Authorization": "Bearer " + self.key, "Content-Type": "application/json", "User-Agent": "remote-meeting-wol/1.1",
         })
         with self.opener.open(request, timeout=30) as response:
             raw = response.read(8193)

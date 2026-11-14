@@ -1,10 +1,12 @@
 import importlib.util
+import errno
 from pathlib import Path
 import socket
 import threading
 import time
 import unittest
 import uuid
+from unittest.mock import patch
 
 
 spec = importlib.util.spec_from_file_location("wol_agent", Path(__file__).parents[1] / "nas" / "agent.py")
@@ -52,6 +54,34 @@ class WakeAgentTests(unittest.TestCase):
         def failure(*_args):
             raise OSError("test UDP failure")
         self.assertFalse(self.make_agent(sender=failure).execute(self.command())["ok"])
+
+    def test_status_probes_both_fixed_ips_without_a_room_mac_or_wake_packets(self):
+        probed, sent = [], []
+        def probe(ip):
+            probed.append(ip)
+            return "online" if ip.endswith(".150") else "unreachable"
+        client = agent.Agent({"WOL_AGENT_KEY": "unit-test-separate-nas-credential-32-chars"}, sender=lambda *args: sent.append(args), prober=probe)
+        command = self.command(type="check", target=None)
+        result = client.execute(command)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["states"], {"small-room": "online", "basement": "unreachable"})
+        self.assertCountEqual(probed, ["192.168.31.150", "192.168.31.100"])
+        self.assertEqual(sent, [])
+        self.assertEqual(client.execute(command), result)
+        self.assertEqual(len(probed), 2)
+        self.assertFalse(client.execute(self.command(type="check", target=None, expiresAt=0))["ok"])
+        self.assertFalse(client.execute(self.command(type="check", target="192.168.31.1"))["ok"])
+        self.assertEqual(len(probed), 2)
+
+    def test_ping_and_tcp_refusal_both_prove_online_without_raw_socket_permission(self):
+        with patch.object(agent, "ping_host", return_value=True), patch.object(agent.socket, "create_connection") as tcp:
+            self.assertEqual(agent.probe_host("192.168.31.150"), "online")
+            tcp.assert_not_called()
+        with patch.object(agent, "ping_host", side_effect=PermissionError()), patch.object(agent.socket, "create_connection", side_effect=ConnectionRefusedError(errno.ECONNREFUSED, "closed")):
+            self.assertEqual(agent.probe_host("192.168.31.150"), "online")
+        with patch.object(agent, "ping_host", side_effect=TimeoutError()), patch.object(agent.socket, "create_connection", side_effect=TimeoutError()) as tcp:
+            self.assertEqual(agent.probe_host("192.168.31.150"), "unreachable")
+            self.assertEqual(tcp.call_count, 3)
 
     def test_configuration_does_not_allow_cleartext_or_arbitrary_destinations(self):
         for options in ({"MEETING_URL": "http://public.example/meeting/"}, {"MEETING_URL": "https://user:password@example.com/"}, {"WOL_AGENT_KEY": "short"}, {"WOL_SMALL_ROOM_MAC": "invalid"}, {"WOL_BROADCAST": "192.168.31.1"}):

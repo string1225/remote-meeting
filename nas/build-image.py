@@ -75,7 +75,7 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--base", default="3.13-alpine", help="Python tag or immutable amd64 manifest digest")
     parser.add_argument("--registry", choices=REGISTRIES, default="docker", help="Docker official library or its public ECR mirror")
-    parser.add_argument("--tag", default="remote-meeting-wol:1.0.0")
+    parser.add_argument("--tag", default="remote-meeting-wol:1.1.0")
     args = parser.parse_args()
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

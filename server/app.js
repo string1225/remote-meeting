@@ -136,6 +136,10 @@ export function createMeetingServer(options = {}) {
         const session = sessionFor(req);
         if (!session) return json(res, 401, { error: '请先登录' });
         if (req.method === 'GET' && path === '/api/wol') return json(res, 200, wake.status());
+        if (req.method === 'POST' && path === '/api/wol/check') {
+          if (!rate('wol-check:' + session.user.id, 20)) return json(res, 429, { error: '状态检查过于频繁，请稍后重试' });
+          return json(res, 200, await wake.check());
+        }
         const target = /^\/api\/wol\/([^/]+)\/wake$/.exec(path)?.[1];
         if (req.method !== 'POST' || !target) return json(res, 404, { error: '不支持的操作' });
         if (!rate('wol-user:' + session.user.id, 10)) return json(res, 429, { error: '唤醒操作过于频繁，请稍后重试' });
