@@ -46,6 +46,9 @@
    Node/浏览器路径，安装启动项时使用 `host/install.ps1 -NoStart`。
 5. 现场服务和有声浏览器应在已登录的 Windows 桌面用户会话中启动。
    服务账号或 Session 0 不能证明设备和有声播放可用。
+   `remote-agent` 后台可能使用 `LOCAL SERVICE`；目录写权限不等于桌面、
+   用户进程或 GitHub 写权限。无法停止源进程或启动目标桌面时，应交由
+   已登录用户运行已准备的脚本，不重复执行被 Windows 拒绝的操作。
 
 ## 媒体网络与切换
 
@@ -77,13 +80,19 @@
 ## 云端发布和回退
 
 云端实际发布与服务快照另见加密部署包。代码发布使用已提交 main 的
-`git archive`；通过现有部署通道传到
-`/opt/remote-meeting/releases/<commit>`，运行该版本 `deploy/install.sh`。
-保留 `/opt/remote-meeting/current` 的旧指向和现有配置。
+`git archive`，通过现有部署通道传到
+`/opt/remote-meeting/releases/<commit>`，保留 `current` 的旧指向。
+现有 139 的实际 TLS/Nginx 配置包含仓库安装脚本尚未收录的修复；本次
+迁移不能直接重跑 `deploy/install.sh` 或 `deploy/install-tls.sh` 覆盖它。
+新建环境须先依照部署快照中的重建手册对齐配置，再评估安装脚本。
 
-脚本将维护项目专用 `remote-meeting`、`remote-meeting-turn`、
-`remote-meeting-tls` 和站点 `/meeting/` include。先验证 `nginx -t`、服务
-状态及公网 HTTPS，再测试媒体。不要覆盖其他站点、全机凭据或其他项目服务。
+只更新代码时复用已验证的生产依赖，先以 `remote-meeting` 服务用户确认
+release 目录可遍历、入口和依赖可读，再切换 `current`。仅文档变更且
+运行源码字节一致时可不重启；重启前必须核实新 release 的读取权限。
+切换媒体配置时只备份并修改必要的 env 项，只重启项目主服务，保留
+`remote-meeting-turn`、`remote-meeting-tls` 和共享 Nginx。验证服务、
+公网 HTTPS 和实际媒体；涉及 Nginx 时另运行 `nginx -t`。不要覆盖其他
+站点、全机凭据或其他项目服务。
 
 若目标失败，先停止目标现场端以释放云端单现场注册，再恢复源启动项和
 已核实的源端启动方式；如果改过 FRP/TURN 环境，则还原对应备份。保留账号、
