@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { createHostService } from './service.js';
 
 const config = JSON.parse(await readFile(resolve(process.env.HOST_CONFIG || '.local/host.json'), 'utf8'));
+const fullscreen = config.fullscreen === true && config.headless !== true;
 config.deviceSettingsFile = resolve(config.deviceSettingsFile || '.local/devices.json');
 config.videoSettingsFile = resolve(config.videoSettingsFile || '.local/video.json');
 await mkdir('.local', { recursive: true });
@@ -18,11 +19,18 @@ async function stop(signal) { if (stopping) return; stopping = true; await log('
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => void stop(signal));
 while (!stopping) {
   try {
-    browser = await chromium.launch({ ...(config.browserPath ? { executablePath: config.browserPath } : { channel: 'msedge' }), headless: config.headless === true, args: ['--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'], ignoreDefaultArgs: ['--mute-audio'] });
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    browser = await chromium.launch({ ...(config.browserPath ? { executablePath: config.browserPath } : { channel: 'msedge' }), headless: config.headless === true, args: ['--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', ...(fullscreen ? ['--start-fullscreen'] : [])], ignoreDefaultArgs: ['--mute-audio'] });
+    const context = await browser.newContext({ viewport: fullscreen ? null : { width: 1280, height: 900 } });
     const page = await context.newPage();
     page.on('pageerror', e => void log(`Renderer error: ${e.message}`));
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    if (fullscreen) {
+      const session = await context.newCDPSession(page);
+      try {
+        const { windowId } = await session.send('Browser.getWindowForTarget');
+        await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'fullscreen' } });
+      } finally { await session.detach(); }
+    }
     await log('Local meeting window opened; waiting for authenticated remotes.');
     await Promise.race([once(browser, 'disconnected'), once(page, 'close'), once(page, 'crash')]);
     await browser.close().catch(() => {});

@@ -8,5 +8,6 @@
   "output": { "profile": "720p20" },
   "virtualCamera": { "enabled": true },
   "rtc": { "encoder": "auto" },
-  "headless": false
+  "headless": false,
+  "fullscreen": false
 }
