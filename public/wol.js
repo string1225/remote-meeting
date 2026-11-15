@@ -14,7 +14,7 @@ export function initWakeControls(accounts, notify) {
     const checking = checkingFor === generation || data.checking;
     refreshButton.disabled = checking;
     refreshButton.textContent = checking ? '正在检查…' : '刷新状态';
-    status.textContent = !data.enabled ? '等待配置 NAS 唤醒服务' : !data.online ? 'NAS 唤醒服务离线 · 请启动容器' : !data.canCheck ? 'NAS 在线 · 请升级容器至 1.1.0 以检查状态' : 'NAS 唤醒服务在线';
+    status.textContent = !data.enabled ? '等待配置 NAS 唤醒服务' : !data.online ? 'NAS 唤醒服务离线 · 请启动容器' : !data.canCheck ? 'NAS 在线 · 请升级容器至 1.1.1 以检查当前电脑地址' : 'NAS 唤醒服务在线';
     list.replaceChildren(...data.targets.map(target => {
       const row = document.createElement('div'); row.className = 'wake-target'; row.dataset.computer = target.id;
       const info = document.createElement('div'), title = document.createElement('strong'), detail = document.createElement('p'), power = document.createElement('span');
@@ -55,7 +55,7 @@ export function initWakeControls(accounts, notify) {
       render(data);
       if (!data.online || !data.canCheck) {
         checkWhenOnline = true;
-        if (manual) notify(!data.online ? 'NAS 离线，请启动容器后再刷新状态。' : '请升级 NAS 容器至 1.1.0，以支持电脑状态检查。', true);
+        if (manual) notify(!data.online ? 'NAS 离线，请启动容器后再刷新状态。' : '请升级 NAS 容器至 1.1.1，以检查当前电脑地址。', true);
         return;
       }
       checkWhenOnline = false;

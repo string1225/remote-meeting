@@ -15,7 +15,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 TARGET_ENV = {"small-room": "WOL_SMALL_ROOM_MAC", "basement": "WOL_BASEMENT_MAC"}
-TARGET_IPS = {"small-room": "192.168.31.150", "basement": "192.168.31.100"}
+TARGET_IPS = {"small-room": "192.168.31.250", "basement": "192.168.31.100"}
 
 
 def ping_host(ip, timeout=0.8):
@@ -156,11 +156,11 @@ class Agent:
         return result
 
     def poll(self, result=None):
-        payload = {"configured": list(self.targets), "capabilities": ["status"]}
+        payload = {"configured": list(self.targets), "capabilities": ["status"], "statusTargets": dict(TARGET_IPS)}
         if result is not None:
             payload["result"] = result
         request = Request(self.url, data=json.dumps(payload).encode("utf-8"), method="POST", headers={
-            "Authorization": "Bearer " + self.key, "Content-Type": "application/json", "User-Agent": "remote-meeting-wol/1.1",
+            "Authorization": "Bearer " + self.key, "Content-Type": "application/json", "User-Agent": "remote-meeting-wol/1.1.1",
         })
         with self.opener.open(request, timeout=30) as response:
             raw = response.read(8193)

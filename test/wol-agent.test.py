@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import errno
 from pathlib import Path
 import socket
@@ -59,14 +60,20 @@ class WakeAgentTests(unittest.TestCase):
         probed, sent = [], []
         def probe(ip):
             probed.append(ip)
-            return "online" if ip.endswith(".150") else "unreachable"
+            return "online" if ip.endswith(".250") else "unreachable"
         client = agent.Agent({"WOL_AGENT_KEY": "unit-test-separate-nas-credential-32-chars"}, sender=lambda *args: sent.append(args), prober=probe)
         command = self.command(type="check", target=None)
         result = client.execute(command)
         self.assertTrue(result["ok"])
         self.assertEqual(result["states"], {"small-room": "online", "basement": "unreachable"})
-        self.assertCountEqual(probed, ["192.168.31.150", "192.168.31.100"])
+        self.assertCountEqual(probed, ["192.168.31.250", "192.168.31.100"])
         self.assertEqual(sent, [])
+        with patch.object(client.opener, "open") as opened:
+            opened.return_value.__enter__.return_value.read.return_value = b'{"command":null}'
+            self.assertIsNone(client.poll())
+            advertised = json.loads(opened.call_args.args[0].data)["statusTargets"]
+        self.assertEqual(set(advertised.values()), set(probed))
+        self.assertEqual(advertised["small-room"], "192.168.31.250")
         self.assertEqual(client.execute(command), result)
         self.assertEqual(len(probed), 2)
         self.assertFalse(client.execute(self.command(type="check", target=None, expiresAt=0))["ok"])
@@ -75,12 +82,12 @@ class WakeAgentTests(unittest.TestCase):
 
     def test_ping_and_tcp_refusal_both_prove_online_without_raw_socket_permission(self):
         with patch.object(agent, "ping_host", return_value=True), patch.object(agent.socket, "create_connection") as tcp:
-            self.assertEqual(agent.probe_host("192.168.31.150"), "online")
+            self.assertEqual(agent.probe_host("192.168.31.250"), "online")
             tcp.assert_not_called()
         with patch.object(agent, "ping_host", side_effect=PermissionError()), patch.object(agent.socket, "create_connection", side_effect=ConnectionRefusedError(errno.ECONNREFUSED, "closed")):
-            self.assertEqual(agent.probe_host("192.168.31.150"), "online")
+            self.assertEqual(agent.probe_host("192.168.31.250"), "online")
         with patch.object(agent, "ping_host", side_effect=TimeoutError()), patch.object(agent.socket, "create_connection", side_effect=TimeoutError()) as tcp:
-            self.assertEqual(agent.probe_host("192.168.31.150"), "unreachable")
+            self.assertEqual(agent.probe_host("192.168.31.250"), "unreachable")
             self.assertEqual(tcp.call_count, 3)
 
     def test_configuration_does_not_allow_cleartext_or_arbitrary_destinations(self):

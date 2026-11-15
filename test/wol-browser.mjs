@@ -14,7 +14,7 @@ let stop = false, commands = 0, checks = 0, roomState = 'online';
 async function nas() {
   let result;
   while (!stop) {
-    const response = await fetch(new URL('api/wol/agent/poll', url), { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify({ configured: ['basement'], capabilities: ['status'], ...(result ? { result } : {}) }) });
+    const response = await fetch(new URL('api/wol/agent/poll', url), { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify({ configured: ['basement'], capabilities: ['status'], statusTargets: { 'small-room': '192.168.31.250', basement: '192.168.31.100' }, ...(result ? { result } : {}) }) });
     const { command } = await response.json();
     result = undefined;
     if (command?.type === 'check') {
@@ -37,6 +37,7 @@ try {
   assert.equal(checks, 1); assert.equal(commands, 0);
   assert.equal(await page.locator('[data-computer="basement"] [data-power-state="unreachable"]').count(), 1);
   assert.match(await page.locator('[data-computer="small-room"]').textContent(), /检查于/);
+  assert.match(await page.locator('[data-computer="small-room"]').textContent(), /192\.168\.31\.250/);
   roomState = 'unreachable';
   await page.getByRole('button', { name: '刷新状态', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('[data-computer="small-room"] [data-power-state="unreachable"]'));

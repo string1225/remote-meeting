@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 export const wakeTargets = Object.freeze([
-  { id: 'small-room', name: '小房间电脑', ip: '192.168.31.150' },
+  { id: 'small-room', name: '小房间电脑', ip: '192.168.31.250' },
   { id: 'basement', name: '地下室大电脑', ip: '192.168.31.100' },
 ]);
 const failure = (status, message) => Object.assign(new Error(message), { status });
@@ -57,13 +57,18 @@ export function createWakeBroker({ enabled = false, pollMs = 20000, commandMs = 
       if (input.capabilities !== undefined && (!Array.isArray(input.capabilities) || input.capabilities.some(value => typeof value !== 'string'))) throw failure(400, '无效的 NAS 能力配置');
       if (input.result?.states !== undefined && !validStates(input.result.states)) throw failure(400, '无效的电脑状态');
       if (waiter) throw failure(409, '已有 NAS 正在连接，请只运行一个唤醒容器');
-      lastSeen = Date.now(); configured = new Set(input.configured); canCheck = input.capabilities?.includes('status') === true;
+      lastSeen = Date.now(); configured = new Set(input.configured);
+      const targetsMatch = input.statusTargets && typeof input.statusTargets === 'object' && !Array.isArray(input.statusTargets)
+        && Object.keys(input.statusTargets).length === wakeTargets.length
+        && wakeTargets.every(target => input.statusTargets[target.id] === target.ip);
+      canCheck = input.capabilities?.includes('status') === true && !!targetsMatch;
+      if (!canCheck) for (const checked of power.values()) checked.state = 'unknown';
       if (input.result) {
         const job = pending.get(input.result.id);
         if (job?.delivered && job.expiresAt > Date.now()) {
           if (!input.result.ok) job.finish(failure(502, job.type === 'check' ? 'NAS 检查电脑状态失败，请稍后重试' : 'NAS 发送唤醒信号失败，请检查容器网络和网卡配置'));
           else if (job.type === 'check') {
-            if (!validStates(input.result.states)) job.finish(failure(502, 'NAS 未返回电脑状态，请更新容器'));
+            if (!canCheck || !validStates(input.result.states)) job.finish(failure(502, 'NAS 检查目标与当前电脑不一致或未返回状态，请更新容器至 1.1.1'));
             else {
               const checkedAt = Date.now();
               for (const target of wakeTargets) power.set(target.id, { state: input.result.states[target.id], checkedAt });
@@ -93,7 +98,7 @@ export function createWakeBroker({ enabled = false, pollMs = 20000, commandMs = 
     },
     async check() {
       requireOnline();
-      if (!canCheck) throw failure(409, '请更新 NAS 容器至 1.1.0，以支持电脑状态检查');
+      if (!canCheck) throw failure(409, '请更新 NAS 容器至 1.1.1，以检查当前电脑地址');
       const existing = [...pending.values()].find(job => job.type === 'check');
       await (existing?.promise || enqueue('check'));
       return broker.status();
