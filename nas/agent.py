@@ -160,7 +160,7 @@ class Agent:
         if result is not None:
             payload["result"] = result
         request = Request(self.url, data=json.dumps(payload).encode("utf-8"), method="POST", headers={
-            "Authorization": "Bearer " + self.key, "Content-Type": "application/json", "User-Agent": "remote-meeting-wol/1.1.1",
+            "Authorization": "Bearer " + self.key, "Content-Type": "application/json", "User-Agent": "remote-meeting-wol/1.1.2",
         })
         with self.opener.open(request, timeout=30) as response:
             raw = response.read(8193)

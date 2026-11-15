@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import shlex
 import tarfile
 import tempfile
 from urllib.request import Request, urlopen
@@ -27,6 +28,21 @@ def digest(data):
 
 def canonical(value):
     return json.dumps(value, separators=(",", ":"), ensure_ascii=True).encode()
+
+
+def image_environment(base):
+    """Keep the NAS importer's defaults identical to Dockerfile builds."""
+    defaults = {}
+    source = Path(__file__).with_name("Dockerfile").read_text(encoding="utf-8")
+    for line in source.replace("\\\n", " ").splitlines():
+        if not line.startswith("ENV "):
+            continue
+        for assignment in shlex.split(line[4:], comments=True):
+            name, separator, value = assignment.partition("=")
+            if not separator or not name:
+                raise ValueError("Dockerfile ENV must use NAME=value assignments")
+            defaults[name] = value
+    return [value for value in base if value.partition("=")[0] not in defaults] + [name + "=" + value for name, value in defaults.items()]
 
 
 def add_file(archive, name, data, mode=0o644):
@@ -75,7 +91,7 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--base", default="3.13-alpine", help="Python tag or immutable amd64 manifest digest")
     parser.add_argument("--registry", choices=REGISTRIES, default="docker", help="Docker official library or its public ECR mirror")
-    parser.add_argument("--tag", default="remote-meeting-wol:1.1.1")
+    parser.add_argument("--tag", default="remote-meeting-wol:1.1.2")
     args = parser.parse_args()
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -136,7 +152,7 @@ def main():
         config["rootfs"]["diff_ids"].append(app_digest)
         config.setdefault("history", []).append({"created_by": "COPY agent.py /app/agent.py"})
         config["config"].update({"User": "65534:65534", "WorkingDir": "/app", "Entrypoint": None, "Cmd": ["python3", "/app/agent.py"], "Labels": {"org.opencontainers.image.title": "Remote Meeting NAS WOL", "org.opencontainers.image.base.digest": base_digest}})
-        config["config"]["Env"] = [value for value in config["config"].get("Env", []) if not value.startswith(("PYTHONDONTWRITEBYTECODE=", "PYTHONUNBUFFERED="))] + ["PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1"]
+        config["config"]["Env"] = image_environment(config["config"].get("Env", []))
         config.pop("container_config", None)
         save_image(output, config, [temp / name for name in layer_names], args.tag)
         # Validate the completed Docker archive against the config's diff IDs.

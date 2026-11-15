@@ -26,7 +26,8 @@ class ImageCompatibilityTests(unittest.TestCase):
                 path = root / hashlib.sha256(payload).hexdigest()
                 path.write_bytes(payload)
                 layers.append(path)
-            settings = {"User": "65534:65534", "WorkingDir": "/app", "Cmd": ["python3", "/app/agent.py"]}
+            environment = image.image_environment(["PATH=/usr/local/bin:/usr/bin", "PYTHON_VERSION=3.13.9", "WOL_AGENT_KEY=discard-this-base-value"])
+            settings = {"User": "65534:65534", "WorkingDir": "/app", "Cmd": ["python3", "/app/agent.py"], "Env": environment}
             config = {"created": "2026-11-05T19:30:27Z", "architecture": "amd64", "os": "linux", "config": settings,
                       "rootfs": {"type": "layers", "diff_ids": ["sha256:" + layer.name for layer in layers]}}
             for suffix in (".tar", ".tar.gz", ".tgz"):
@@ -52,6 +53,18 @@ class ImageCompatibilityTests(unittest.TestCase):
                         self.assertEqual(ordered, [layer.name for layer in reversed(layers)])
                         manifest = json.load(archive.extractfile("manifest.json"))[0]
                         modern = json.load(archive.extractfile(manifest["Config"]))
+                        for actual in (top["config"]["Env"], modern["config"]["Env"]):
+                            variables = dict(value.split("=", 1) for value in actual)
+                            self.assertEqual(len(actual), len(variables))
+                            self.assertEqual(variables["MEETING_URL"], "https://home.sunny-string.cn/meeting/")
+                            self.assertEqual(variables["WOL_AGENT_KEY"], "")
+                            self.assertEqual(variables["WOL_BROADCAST"], "192.168.31.255")
+                            self.assertEqual(variables["WOL_BASEMENT_MAC"], "22-18-4D-11-5D-C0")
+                            self.assertEqual(variables["WOL_SMALL_ROOM_MAC"], "B8-88-E3-F9-AD-19")
+                            self.assertEqual(variables["PATH"], "/usr/local/bin:/usr/bin")
+                            self.assertEqual(variables["PYTHON_VERSION"], "3.13.9")
+                            self.assertEqual(variables["PYTHONDONTWRITEBYTECODE"], "1")
+                            self.assertEqual(variables["PYTHONUNBUFFERED"], "1")
                         for index, path in enumerate(manifest["Layers"]):
                             payload = archive.extractfile(path).read()
                             self.assertEqual("sha256:" + hashlib.sha256(payload).hexdigest(), modern["rootfs"]["diff_ids"][index])
