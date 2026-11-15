@@ -41,3 +41,19 @@
 .device-actions button{min-height:44px;padding:10px 14px;white-space:nowrap}
 .device-settings-row #device-message{flex:1;min-width:180px;margin:0;font-size:12px;line-height:1.6}
 @media(max-width:760px){.host-console .host-meeting-grid{grid-template-columns:1fr}.device-settings-row .device-mirrors,.device-actions,.device-settings-row #device-message{flex-basis:100%}.device-actions{min-width:0}}
+
+/* Keep the preview first; group console navigation in the host header. */
+.host-console>header{height:auto;min-height:64px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:10px 26px}
+.host-console>header .brand{white-space:nowrap}
+.host-console>header .meeting-top{flex:1;min-width:0;margin:0;gap:16px}
+.host-console>header .eyebrow{display:none}
+.host-console>header .meeting-top h1{font-size:16px;margin:0;white-space:nowrap}
+.host-console>header .meeting-top h1 span{font-size:11px}
+.host-console>header .meeting-actions{flex-wrap:nowrap}
+.host-console>header .meeting-actions>button{padding:12px 16px;font-size:13px;white-space:nowrap}
+.host-console>header #connection{white-space:nowrap}
+.host-capture-controls{display:flex;flex-direction:column;gap:10px}
+.host-capture-controls>.hint{margin:0}
+@media(max-width:1100px){.host-console>header .meeting-top{flex-wrap:wrap}.host-console>header #connection{margin-left:auto}}
+@media(max-width:850px){.host-console>header .meeting-top{flex-direction:row;align-items:center}}
+@media(max-width:600px){.host-console>header{padding:10px 14px;gap:10px}.host-console>header .meeting-top{flex-basis:100%;order:2;gap:10px}.host-console>header .meeting-actions{flex-wrap:wrap}.host-console>header .meeting-top h1{font-size:16px}}
