@@ -30,6 +30,13 @@
    现有凭据或本仓库专用 deploy key，避免复制个人通用 Git 凭据。
 5. 包中的 `local-changes-reference` 是源机器在迁移前已经存在的未提交
    修改，仅作交接参考；不得自动应用、提交或部署。
+6. 后台账号解包的仓库可能由 `LOCAL SERVICE` 所有，桌面用户首次运行
+   Git 时会触发 `detected dubious ownership`。核对包校验和及工作目录后，
+   仅为目标桌面用户信任这一个仓库：
+   `git config --global --add safe.directory C:/Users/syw91/Code/remote-meeting`。
+   不使用 `safe.directory=*`；后台账号自己的全局设置不能代替桌面用户
+   设置。交接启动脚本还应在 Git 命令中传入该精确目录的进程级信任，
+   并先检查 Git 退出码；Git 执行失败与真实提交不匹配须分别报告。
 
 ## Windows 环境和配置
 
