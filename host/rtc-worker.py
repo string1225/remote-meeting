@@ -111,16 +111,21 @@ def output_dimensions(width, height, settings):
 
 def video_encoder(width, height, fps, preferred='auto', bitrate=VIDEO_BITRATE):
     errors = []
-    for name in (['h264_qsv', 'libx264'] if preferred == 'auto' else [preferred]):
+    for name in (['h264_qsv', 'h264_mf', 'libx264'] if preferred == 'auto' else [preferred]):
         try:
             codec = av.CodecContext.create(name, 'w')
             codec.width, codec.height, codec.bit_rate = width, height, bitrate
             codec.time_base, codec.framerate = Fraction(1, 90000), Fraction(fps)
-            codec.pix_fmt = 'nv12' if name == 'h264_qsv' else 'yuv420p'
+            codec.pix_fmt = 'nv12' if name in ('h264_qsv', 'h264_mf') else 'yuv420p'
             codec.thread_count, codec.gop_size, codec.max_b_frames = 2, fps, 0
-            codec.options = ({'preset': 'veryfast', 'tune': 'zerolatency', 'profile': 'baseline', 'x264-params': f'repeat-headers=1:keyint={fps}:min-keyint={fps}:scenecut=0'}
-                             if name == 'libx264' else {'preset': 'veryfast', 'look_ahead': '0', 'async_depth': '1', 'profile': 'baseline', 'repeat_pps': '1'})
-            codec.options.update(maxrate=str(bitrate), bufsize=str(max(round(bitrate / fps * 1.25), bitrate // 8)))
+            if name == 'h264_mf':
+                # Require a hardware MFT; never silently select MF software encoding.
+                codec.options = {'hw_encoding': '1', 'scenario': 'video_conference',
+                                 'rate_control': 'cbr', 'quality': '0'}
+            else:
+                codec.options = ({'preset': 'veryfast', 'tune': 'zerolatency', 'profile': 'baseline', 'x264-params': f'repeat-headers=1:keyint={fps}:min-keyint={fps}:scenecut=0'}
+                                 if name == 'libx264' else {'preset': 'veryfast', 'look_ahead': '0', 'async_depth': '1', 'profile': 'baseline', 'repeat_pps': '1'})
+                codec.options.update(maxrate=str(bitrate), bufsize=str(max(round(bitrate / fps * 1.25), bitrate // 8)))
             if name == 'h264_qsv': codec.options.update(low_delay_brc='1', max_frame_size=str(max(4096, round(bitrate / fps / 4))))
             codec.open()
             # Some drivers defer device initialization until the first frame.
