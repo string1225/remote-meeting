@@ -5,7 +5,7 @@ import { pageFullscreen, remotePlayers } from '/media.js';
 import { createAudioMonitor } from '/audio-meter.js';
 import { createPlaybackControls } from '/playback-controls.js';
 const $ = id => document.getElementById(id);
-let bridge, current, reconnectTimer;
+let bridge, current, reconnectTimer, previewLoading = false;
 function showView(camera) {
   $('camera-view').hidden = !camera; $('access-settings').hidden = camera;
   $('view-cameras').setAttribute('aria-pressed', String(camera)); $('view-settings').setAttribute('aria-pressed', String(!camera));
@@ -19,8 +19,8 @@ const playback = createPlaybackControls({ button: $('play-audio'), container: $(
 const players = remotePlayers({ container: $('remote-media'), audioContainer: $('remote-audio'), playback, monitor, onChange: () => { $('remote-empty').hidden = players.size > 0; } });
 const rtc = new MeetingRTC({ channel: 'remote-media', initiate: true, receive: true, send, onTrack: (peer, track) => players.track(peer, track), onPeer: peer => { players.update(peer); renderParticipants(); }, onRemove: peer => players.remove(peer), onError: e => error(e.message) });
 pageFullscreen($('local-stage'), $('local-fullscreen'));
-$('local-preview').onload = () => { if (current?.capturing) { $('local-preview').hidden = false; $('local-empty').hidden = true; } };
-$('local-preview').onerror = () => { $('local-preview').hidden = true; $('local-empty').hidden = false; };
+$('local-preview').onload = () => { previewLoading = false; if (current?.capturing) { $('local-preview').hidden = false; $('local-empty').hidden = true; } };
+$('local-preview').onerror = () => { previewLoading = false; $('local-preview').hidden = true; $('local-empty').hidden = false; };
 function renderParticipants() {
   $('participants').replaceChildren(...(current?.peers || []).map(info => {
     const peer = rtc.peers.get(info.id), row = document.createElement('p'); row.textContent = info.name + ' · ' + (peer?.link || ({ connected: '音视频已连接', failed: '服务器转发连接失败，请检查网络', disconnected: '连接中断，正在恢复' }[peer?.state] || '正在连接转发服务器')); return row;
@@ -45,7 +45,7 @@ function render(status) {
   const previewReady = status.capturing && $('local-preview').naturalWidth > 0 && !!$('local-preview').getAttribute('src');
   $('local-empty').hidden = previewReady; $('local-preview').hidden = !previewReady;
   $('local-empty').textContent = status.capturing ? '正在读取现场合成预览…' : '远端可启动现场摄像头';
-  if (!status.capturing) $('local-preview').removeAttribute('src');
+  if (!status.capturing) { previewLoading = false; $('local-preview').removeAttribute('src'); }
   renderParticipants();
 }
 function connect() {
@@ -75,8 +75,14 @@ $('video-profile').onchange = async () => {
 $('host-microphone-toggle').onclick = () => void device('microphone', !current?.microphone);
 $('pause').onclick = () => send({ type: current?.paused ? 'bridge-resume' : 'bridge-pause' });
 $('retry-media').onclick = () => { for (const peer of [...rtc.peers.values()]) { rtc.remove(peer.info.id); rtc.add(peer.info); } };
-const timer = setInterval(() => { void rtc.stats().then(stats => { for (const { id, ...data } of stats) send({ type: 'return-media-stats', id, data }); }); if (current?.capturing && !$('camera-view').hidden) $('local-preview').src = '/api/preview?t=' + Date.now(); }, 1000);
-window.addEventListener('pagehide', () => { clearInterval(timer); clearTimeout(reconnectTimer); rtc.clear(); monitor.dispose(); const old = bridge; bridge = null; old?.close(); });
+const timer = setInterval(() => { void rtc.stats().then(stats => { for (const { id, ...data } of stats) send({ type: 'return-media-stats', id, data }); }); }, 1000);
+// Keep local motion visible without overlapping image requests on a busy host.
+const previewTimer = setInterval(() => {
+  if (current?.capturing && !document.hidden && !$('camera-view').hidden && !previewLoading) {
+    previewLoading = true; $('local-preview').src = '/api/preview?t=' + Date.now();
+  }
+}, 100);
+window.addEventListener('pagehide', () => { clearInterval(timer); clearInterval(previewTimer); clearTimeout(reconnectTimer); rtc.clear(); monitor.dispose(); const old = bridge; bridge = null; old?.close(); });
 window.hostDiagnostics = () => ({ ...current, localMedia: { video: false, audio: false }, rtc: [...rtc.peers.values()].map(p => ({ id: p.info.id, state: p.state, media: p.media })) });
 window.hostMediaStats = () => rtc.lastStats || [];
 connect();

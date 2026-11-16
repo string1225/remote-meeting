@@ -231,7 +231,7 @@ class Devices:
                     import base64
                     _, jpeg = cv2.imencode('.jpg', cv2.resize(image, (640, 360)), [cv2.IMWRITE_JPEG_QUALITY, 65])
                     emit(type='preview', jpeg=base64.b64encode(jpeg).decode('ascii'))
-                    preview_at = time.monotonic() + 0.5
+                    preview_at = time.monotonic() + 0.1
                 if self.video.listeners:
                     if pending.full():
                         try: pending.get_nowait()
