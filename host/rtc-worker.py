@@ -138,6 +138,39 @@ def video_encoder(width, height, fps, preferred='auto', bitrate=VIDEO_BITRATE):
     raise RuntimeError('; '.join(errors))
 
 
+class LiveVideoEncoder:
+    def __init__(self, width, height, fps, preferred, bitrate):
+        self.width, self.height, self.fps = width, height, fps
+        self.codec, self.name = video_encoder(width, height, fps, preferred, bitrate)
+        self.fallback_reason = ''
+
+    def fallback(self, bitrate, reason):
+        # Some legacy hardware MFTs buffer several frames and ignore live rate
+        # changes. Re-encode a fresh IDR instead of publishing their stale queue.
+        self.codec, self.name = video_encoder(self.width, self.height, self.fps, 'libx264', bitrate)
+        self.fallback_reason = reason
+
+    def encode(self, frame, bitrate, fps):
+        changed = abs(self.codec.bit_rate - bitrate) > self.codec.bit_rate * 0.15
+        if self.name == 'h264_mf' and (fps < 15 or changed):
+            self.fallback(bitrate, 'mf-frame-buffer' if fps < 15 else 'mf-rate-change')
+            frame.pict_type = av.video.frame.PictureType.I
+        elif changed:
+            self.codec.bit_rate = bitrate
+        packets = list(self.codec.encode(frame))
+        if self.name == 'h264_mf':
+            # video_encoder primes the driver with a timestamp-zero probe.
+            packets = [packet for packet in packets if packet.pts != 0]
+        if self.name == 'h264_mf' and any(
+                packet.pts is not None and packet.time_base is not None and
+                time.monotonic() - float(packet.pts * packet.time_base) > MAX_FRAME_AGE * 0.75
+                for packet in packets):
+            self.fallback(bitrate, 'mf-frame-buffer')
+            frame.pict_type = av.video.frame.PictureType.I
+            packets = list(self.codec.encode(frame))
+        return packets
+
+
 class Devices:
     def __init__(self, config, loop):
         self.config, self.loop = config, loop
@@ -174,24 +207,21 @@ class Devices:
         width, height, fps = settings['width'], settings['height'], settings['fps']
         def encode():
             try:
-                codec, name = video_encoder(width, height, fps, self.config.get('encoder', 'auto'), self.target_bitrate)
-                encoder_info.append((name, codec.bit_rate)); encoder_ready.set()
+                encoder = LiveVideoEncoder(width, height, fps, self.config.get('encoder', 'auto'), self.target_bitrate)
+                encoder_info.append((encoder.name, encoder.codec.bit_rate, encoder.fallback_reason)); encoder_ready.set()
                 while not self.camera_stop.is_set():
                     try: image, pts = pending.get(timeout=0.1)
                     except queue.Empty: continue
                     start = time.perf_counter()
-                    if abs(codec.bit_rate - self.target_bitrate) > codec.bit_rate * 0.15:
-                        # QSV re-opening stalls the capture/encode pipeline for
-                        # hundreds of ms. Reconfigure its rate on the live codec.
-                        codec.bit_rate = self.target_bitrate
                     frame = av.VideoFrame.from_ndarray(cv2.cvtColor(image, cv2.COLOR_BGR2YUV_I420), format='yuv420p')
                     frame.pts, frame.time_base = pts, Fraction(1, 90000)
                     if encoded[0] % fps == 0 or self.force_keyframe.is_set():
                         self.force_keyframe.clear()
                         frame.pict_type = av.video.frame.PictureType.I
-                    for packet in codec.encode(frame):
+                    for packet in encoder.encode(frame, self.target_bitrate, self.target_fps):
                         encoded_bytes[0] += len(bytes(packet)); largest_frame[0] = max(largest_frame[0], len(bytes(packet)))
                         self.video.publish(packet)
+                    encoder_info[0] = (encoder.name, encoder.codec.bit_rate, encoder.fallback_reason)
                     encoded[0] += 1
                     encode_times.append((time.perf_counter() - start) * 1000)
                     if len(encode_times) > 30: del encode_times[0]
@@ -214,7 +244,7 @@ class Devices:
             encoder_thread = threading.Thread(target=encode, daemon=True)
             encoder_thread.start(); encoder_ready.wait()
             if encoder_errors: raise encoder_errors[0]
-            encoder, bitrate = encoder_info[0]
+            encoder, bitrate, _ = encoder_info[0]
             if self.camera_stop.is_set(): return
             emit(type='camera-state', state='ready', cameras=[s.info for s in sources], encoder=encoder,
                  output=dict(width=width, height=height, fps=fps, targetBitrate=bitrate))
@@ -247,7 +277,7 @@ class Devices:
                 elapsed = time.monotonic() - last
                 if elapsed >= 2:
                     produced, times = encoded[0], encode_times.copy()
-                    emit(type='metrics', fps=round((produced-last_encoded)/elapsed, 1), composeFps=round(count/elapsed, 1), encodeMs=round(sum(times)/max(1,len(times)), 1), renderMs=round(render_ms/count, 1), encoder=encoder, videoCeiling=self.video_ceiling, targetBitrate=self.target_bitrate, encodedKbps=round((encoded_bytes[0]-last_bytes)*8/elapsed/1000), largestFrameBytes=largest_frame[0])
+                    emit(type='metrics', fps=round((produced-last_encoded)/elapsed, 1), composeFps=round(count/elapsed, 1), encodeMs=round(sum(times)/max(1,len(times)), 1), renderMs=round(render_ms/count, 1), encoder=encoder_info[0][0], encoderFallback=encoder_info[0][2], videoCeiling=self.video_ceiling, targetBitrate=self.target_bitrate, encodedKbps=round((encoded_bytes[0]-last_bytes)*8/elapsed/1000), largestFrameBytes=largest_frame[0])
                     last_bytes = encoded_bytes[0]; largest_frame[0] = 0
                     last, count, last_encoded, render_ms = time.monotonic(), 0, produced, 0
         except Exception as error:

@@ -46,6 +46,42 @@ class RtcVideoTests(unittest.TestCase):
         self.assertEqual(worker.output_dimensions(1920, 1080, dict(width=1920, height=1080, fps=30, profile='1080p30')), (1920, 1080))
         self.assertEqual(worker.output_dimensions(1920, 1080, dict(width=854, height=480, fps=30, profile='480p30')), (854, 480))
 
+    def test_buffered_hardware_recovers_with_a_fresh_decodable_keyframe(self):
+        delayed = av.Packet(b'old hardware frame')
+        delayed.pts, delayed.time_base = 8964000, Fraction(1, 90000)
+        fake = SimpleNamespace(bit_rate=1500000, encode=lambda frame: [delayed])
+        real_factory = worker.video_encoder
+        def factory(width, height, fps, preferred, bitrate):
+            if preferred == 'auto': return fake, 'h264_mf'
+            return real_factory(width, height, fps, preferred, bitrate)
+        with patch.object(worker, 'video_encoder', side_effect=factory), patch.object(worker.time, 'monotonic', return_value=100):
+            encoder = worker.LiveVideoEncoder(640, 360, 30, 'auto', 1500000)
+            frame = av.VideoFrame(640, 360, 'yuv420p')
+            frame.pts, frame.time_base = 9000000, Fraction(1, 90000)
+            packets = encoder.encode(frame, 1500000, 30)
+            self.assertEqual(encoder.name, 'libx264')
+            self.assertEqual(encoder.fallback_reason, 'mf-frame-buffer')
+            self.assertTrue(packets[0].is_keyframe)
+            self.assertEqual(packets[0].pts, frame.pts)
+            decoder = av.CodecContext.create('h264', 'r')
+            self.assertTrue([image for packet in packets for image in decoder.decode(packet)])
+
+    def test_hardware_rate_or_framerate_changes_do_not_keep_a_stale_encoder(self):
+        real_factory = worker.video_encoder
+        for bitrate, fps, reason in [(250000, 30, 'mf-rate-change'), (1500000, 5, 'mf-frame-buffer')]:
+            fake = SimpleNamespace(bit_rate=1500000, encode=lambda frame: self.fail('Buffered MFT must not be fed at the new rate'))
+            def factory(width, height, fps, preferred, bitrate):
+                if preferred == 'auto': return fake, 'h264_mf'
+                return real_factory(width, height, fps, preferred, bitrate)
+            with patch.object(worker, 'video_encoder', side_effect=factory):
+                encoder = worker.LiveVideoEncoder(640, 360, 30, 'auto', 1500000)
+                frame = av.VideoFrame(640, 360, 'yuv420p')
+                frame.pts, frame.time_base = 9000000, Fraction(1, 90000)
+                packets = encoder.encode(frame, bitrate, fps)
+                self.assertEqual(encoder.fallback_reason, reason)
+                self.assertEqual(encoder.codec.bit_rate, bitrate)
+                self.assertTrue(packets[0].is_keyframe)
+
 
 class RtcFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_overflow_and_stale_video_wait_for_a_fresh_keyframe(self):
